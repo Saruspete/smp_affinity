@@ -1,0 +1,129 @@
+.TH smp_affinity 1 "2015-05-02" "Version 2.0" ""
+
+.SH NAME
+smp_affinity \- CPU Affinity manager for IRQ and Processes
+
+.SH SYNOPSIS
+.B
+\fBsmp_affinity\fR [OPTIONS...]
+
+
+
+.SH DESCRIPTION
+.P
+smp_affinity allows you to manage the CPU bindings of IRQs and Processes.
+
+.SS IRQ Handling in Linux
+.P
+Communications with the outside world are managed by IRQ (Interrupt. ReQuest)
+These interruptions are sent by the hardware cards to the CPU, indicating 
+there is some processing to be done with the data received (eg network packet)
+
+.P
+On the Linux Kernel, there is 2 parts using them: \fItop-half\fR and \fIbottom-half\fR
+
+.P
+\fItop-half\fR is a time critical interruption handler. Most of the time, it
+catch the IRQ and add it to a queue for deferred processing by the bottom 
+half. The CPUs able to handle the IRQs are defined by a bitmask in
+/proc/irq/<IRQ_NUMBER>/smp_affinity
+
+.P
+\fIbottom-half\fR is doing the real processing work. It is available to the user
+as a kernel process in a "ps" list (processes under brackets).
+These are preemptible, cpu-allocatable threads. Their CPU affinity is editable
+through 'taskset' tool. 
+
+.SS OPTIONS
+
+\fIlist\fR is a string representing a listing of elements (irqs, pids, cpus...)
+.br
+On the left the input string, on the right the resulting list for the script:
+.br
+\fB1,3,7,9\fR      1 3 7 9
+.br
+\fB2-5\fR          2 3 4 5
+.br
+\fB1-3,5-8\fR      1 2 3 5 6 7 8
+.br
+\fB0,2,5-7,15\fR   0 1 5 6 7 15
+.br
+\fBALL\fR          0 1 2 ... XX   (all available elements)
+
+
+.TP
+\fB\-h\fR
+Display the help. When added to other options, it will display their current
+value (eg changed by other options)
+
+.TP
+\fB\-d\fR \fIlist\fR
+Display only defined elements. This means Processes and IRQ which are able to
+run on every CPUs will not be displayed.
+When used with -c option, will only display elements runnable on the requested
+CPUs
+
+.TP
+\fB\-c\fR \fIlist\fR
+Display only elements bound to the selected CPUs. CPUs are identifed as the 
+\fIprocessor\fR elements on \fB/proc/cpuinfo\fR listing.
+.TP
+\fB\-i\fR \fIlist\fR
+Display the CPU affinity for the given IRQs list
+.TP
+\fB\-p\fR \fIlist\fR
+Display the CPU affinity for the given PIDs list
+
+
+.TP
+\fB\-C\fR \fIlist\fR
+Set the selected items to this CPU list
+.TP
+\fB\-I\fR \fIrange\fR
+Set the CPU affinity for the given IRQs list 
+.TP
+\fB\-P\fR \fIrange\fR
+Set the CPU affinity for the given PIDs list
+
+
+.SH EXAMPLES
+.P
+
+.SS Displaying
+
+Display all processes and all IRQs
+  \fBsmp_affinity -i ALL -p ALL\fR
+
+Display all processes and all IRQs with a custom affinity
+  \fBsmp_affinity -i ALL -p ALL -d
+
+Display all processes and all IRQs able to run on CPUs 0 and 2
+  \fBsmp_affinity -i ALL -p ALL -c 0,2 -d
+
+.SS Setting
+Bind the IRQs 10 to 20 to CPUs 0 2 4 8
+  \fBsmp_affinity -I 10-20 -C 0,2,4,8\fR
+
+Bind the IRQs 45 to 50 and Process 1234 to CPU 4
+  \fBsmp_affinity -I 45-50 -P 1234 -C 4
+
+.SS Setting and displaying
+Bind the IRQs 45 to 50 and Process 1234 to CPU 4, then display IRQs and 
+Processes able to run on CPU 4
+  \fBsmp_affinity -I 45-50 -P 1234 -C 4 -i ALL -p ALL -c 4 -d
+
+
+.SH AUTHOR
+.P
+Adrien Mahieux <adrien.mahieux@gmail.com>
+
+.SH COPYRIGHT
+.P
+This program is distrubted under the \fBGNU GPLv3\fR
+
+
+.SH SEE ALSO
+
+\fBtaskset\fR(1), \fBsched_setaffinity\fR(2), \fBsched_getaffinity\fR(2)
+
+

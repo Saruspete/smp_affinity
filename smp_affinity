@@ -1,0 +1,543 @@
+#!/usr/bin/perl
+
+
+# #############################################################################
+# smp_affinity.pl - Utility to get/set affinities of IRQs and Processes
+# 
+# Author : Adrien Mahieux <adrien.mahieux@gmail.com>
+# 
+# #############################################################################
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# #############################################################################
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use Getopt::Long qw(:config no_ignore_case gnu_compat bundling auto_help);
+use Pod::Usage;
+
+my $opt_show_help;
+my $opt_show_sep = ' ';
+
+my $opt_show_onlymod;
+my $opt_show_onlydef;
+my $opt_show_stats;
+my $opt_show_kthreads;
+my $opt_show_quiet;
+
+my @opt_show_listcpu;
+my @opt_show_listirq;
+my @opt_show_listproc;
+my @opt_show_listuser;
+
+my @opt_set_listcpu;
+my @opt_set_listirq;
+my @opt_set_listproc;
+my $opt_set_distribute;
+
+my $bin_taskset = findbin('taskset');
+
+
+# Parse options
+GetOptions(
+	# Help
+	'h|help'			=> \$opt_show_help,
+
+	# Display modifiers options
+	'm|modified-only'	=> \$opt_show_onlymod,
+	'd|defined-only'	=> \$opt_show_onlydef,
+	'k|kernel-threads'	=> \$opt_show_kthreads,
+	's|statistics'		=> \$opt_show_stats,
+	'q|quiet'			=> \$opt_show_quiet,
+	# Display filter lists
+	'c|show-cpus=s'		=> \@opt_show_listcpu,
+	'i|show-irq=s'		=> \@opt_show_listirq,
+	'p|show-proc=s'		=> \@opt_show_listproc,
+	'u|show-user=s'		=> \@opt_show_listuser,
+
+	# Setting values
+	'C|set-cpu=s'		=> \@opt_set_listcpu,
+	'I|set-irq=s'		=> \@opt_set_listirq,
+	'P|set-proc=s'		=> \@opt_set_listproc,
+	'D|distribute=i'	=> \$opt_set_distribute,
+) or die ('Error while parsing options. Stopping');
+
+pod2usage(-verbose=>2) if $opt_show_help;
+
+# #############################################################################
+#
+# Main processing
+#
+# #############################################################################
+
+
+# #########################################################
+# Pre-checks and command line parsing
+#
+
+if (@opt_show_listirq || @opt_set_listirq) {
+	if ( !irq_available() ) {
+		print "IRQs management is not available. Are you root ?\n";
+		exit(1);
+	}
+	@opt_show_listirq = @{string2list(\@opt_show_listirq)};
+	@opt_set_listirq  = @{string2list(\@opt_set_listirq)};
+
+	#@opt_set_listirq  = irq_list() if (inarray('ALL', @opt_set_listirq));
+}
+
+if (@opt_show_listproc || @opt_set_listproc) {
+	if ( !proc_available() ) {
+		print "The Process management is not available\n";
+		print "Be sure the program 'taskset' is installed on this system\n";
+		exit(1);
+	}
+	@opt_show_listproc  = @{string2list(\@opt_show_listproc)};
+	@opt_set_listproc   = @{string2list(\@opt_set_listproc)};
+	
+	#@opt_set_listproc  = proc_list() if (inarray('ALL', @opt_set_listproc));
+}
+
+if (@opt_set_listirq || @opt_set_listproc) {
+	if (!@opt_set_listcpu) {
+		print "You must specify a list of CPUs to set (-C <cpu-list>)\n";
+		exit(1);
+	}
+}
+
+
+# Defaults to all CPUs to display
+if (!@opt_show_listcpu) {
+	@opt_show_listcpu = @{cpu_list()};
+}
+
+# Do standard expansion
+@opt_set_listcpu  = @{string2list(\@opt_set_listcpu)};
+@opt_show_listcpu = @{string2list(\@opt_show_listcpu)};
+
+# Replace special values by their real listing
+@opt_set_listcpu  = @{cpu_list()} if (inarray('ALL', @opt_set_listcpu));
+@opt_show_listcpu = @{cpu_list()} if (inarray('ALL', @opt_show_listcpu));
+
+
+# #########################################################
+# Set requested values
+#
+
+# IRQs
+if (@opt_set_listirq) {
+	
+	# 
+	foreach my $irq (@opt_set_listirq) {
+		irq_setaffinity($irq, \@opt_set_listcpu);
+	}
+}
+
+# Processes
+if (@opt_set_listproc) {
+	
+	# 
+	foreach my $pid (@opt_set_listproc) {
+		proc_setaffinity($pid, \@opt_set_listcpu);
+	}
+}
+
+
+# #########################################################
+# Display
+#
+
+# Get some variables
+my $term_size = int(qx(/usr/bin/tput cols)) || 80;
+
+my @cpu_list = @{cpu_list()};
+my $cpu_count = $#cpu_list+1;
+
+# TODO Refine this list to take into account isolcpu param 
+my $proc_default = list2mask(\@cpu_list);
+my $irq_default = irq_default();
+
+# Calculations for column sizes
+my $col_sep = ' ';
+my $col_id  = 5;
+my $col_name = 8;
+my $col_cpu = $cpu_count * 3; # 3 cols / cpu
+
+# dyn column = term width -  1st col  - 2nd col     - last col   - 3 cols * 1 char separator
+my $col_text = $term_size - ($col_id) - ($col_name) - ($col_cpu) - (3*1) -1;
+
+# lines formaters
+#my $head = "%-".($col_id+1+$col_name+1+$col_text+1)."s ";
+my $head =	"%-${col_id}s" 		. $col_sep .
+			"%-${col_name}s"	. $col_sep .
+			"%-${col_text}s "	. $col_sep;
+
+my $body =	"%-${col_id}.${col_id}s" . $col_sep .
+			"%-${col_name}.${col_name}s" . $col_sep .
+			"%-${col_text}.${col_text}s" . $col_sep .
+			" %s";
+
+
+# Show the header if not quiet
+if (!$opt_show_quiet) {
+	# Print the header
+	printf($head, "ID", "Owner", "Description");
+	foreach my $cpu (@cpu_list) {
+		print(" ") if ($cpu <= 9);
+		print("$cpu ");
+	}
+	print "\n";
+}
+
+
+# Display IRQs
+if (@opt_show_listirq) {
+
+	foreach my $irq (@{irq_list()}) {
+
+		# Filter on non-stnadard affinities only
+		next if ($opt_show_onlydef && $irq->{affinity} eq $irq_default );
+
+
+		# Filter
+		if (inarray('ALL', @opt_show_listirq) || inarray($irq->{irq}, @opt_show_listirq)) {
+			my $text = $irq->{name};
+
+			if ($opt_show_stats) {
+				$text .= "";
+			}
+
+			printf($body."\n", 
+					$irq->{irq},
+					'', 
+					$text,
+					cpu_dispmask(\@opt_show_listcpu, $irq->{affinity})
+				);
+		}
+	}
+}
+
+# Display CPUs
+if (@opt_show_listproc) {
+
+	
+	# Order the process list - I bet you love Schwartzian transform :)
+	my @proclist =	map { $_->[2] }
+					sort { $a->[1] <=> $b->[1] || $a->[0] <=> $b->[0] }
+					map { [int($_->{pid}), (int($_->{ppid}||0) eq 2)? 0 : ($_->{ppid}||0), $_] } 
+					@{proc_list()};
+	
+	
+	# Walk on each process
+	foreach my $proc (@proclist) {
+
+		# Filter on user
+		next if (@opt_show_listuser && ! inarray($proc->{user}, @opt_show_listuser));
+
+		# Filter on kernel thread (PID: 1=init, 2=kthreadd)
+		next if (!$opt_show_kthreads && ($proc->{pid} eq 2 || $proc->{ppid} eq 2));
+
+		if (inarray('ALL', @opt_show_listproc) ||
+			inarray($proc->{tid}, @opt_show_listproc) ||
+			inarray($proc->{pid}, @opt_show_listproc) ) {
+			
+			# Skip elements where we don't have affinity
+			my $affinity = proc_getaffinity($proc->{tid}) || next;
+
+			# Filter on non-stnadard affinities only
+			next if ($opt_show_onlydef && $affinity eq $proc_default );
+
+
+			my $text = (($proc->{tid} != $proc->{pid}) ? '    ' : '') . join(' ', @{$proc->{args}});
+
+			# Add more statistics before
+			if ($opt_show_stats) {
+				$text = sprintf("%s %-2s %-4s %-4s", $proc->{class}, $proc->{rtprio}, $proc->{pcpu}, $proc->{pmem})." $text";
+			}
+			
+			# Finally, display
+			printf($body."\n", 
+					$proc->{tid},
+					$proc->{user},
+					$text,
+					cpu_dispmask(\@opt_show_listcpu, $affinity), 
+				);
+		}
+	}
+}
+
+
+
+
+# #############################################################################
+#
+# Working subs : The magic happens here
+# 
+# #############################################################################
+
+
+# Find a binary in $ENV{PATH} and usual paths
+sub findbin {
+	my $cmd = shift;
+	my @paths = split(/:/, $ENV{PATH});
+	push(@paths, ('/sbin','/usr/sbin'));
+	foreach my $path (@paths) {
+		my $b = $path.'/'.$cmd;
+		return $b if (-x $b);
+	}
+	return;
+}
+
+# Is an element in an array
+sub inarray {
+	my $match = shift;
+	grep $_ eq $match, @_;
+}
+
+# Normalize the spaces
+sub normalize {
+	my ($str) = @_;
+	return '' if (!$str);
+	$str =~ s/\t/ /g;
+	$str =~ s/\s+/ /g;
+	$str =~ s/(^\s*)|(\s*$)//g;
+	chomp($str);
+	return $str;
+}
+
+# Get the content of a file
+sub filegetcontents {
+	my $file = shift || return '';
+	my $fh;
+	my $content = '';
+	open($fh, "<", $file);
+	{
+		local $/ = undef;
+		$content = <$fh>;
+	}
+	close($fh);
+	return $content;
+}
+# Set the content of a file
+sub fileputcontents {
+	my $file = shift || return;
+	my $data = shift || return;
+	my $fh;
+	open($fh, '>', $file);
+	print($fh $data);
+	close($fh);
+
+	return 1;
+}
+
+
+# Transform an array of IDs to a mask
+sub list2mask {
+	my $mask = 0;
+	foreach my $cpu (@{$_[0]}) {
+		$mask |= 1 << $cpu;
+	}
+	return $mask;
+}
+
+sub string2list {
+	my @list;
+	# Each element in the array
+	foreach my $elem  (@{$_[0]}) {
+		# Each listing
+		foreach my $unit (split(/,/, $elem)) {
+			# Each range in listing (if any)
+			if (index($unit,'-') > -1) {
+				my ($from,$to) = split(/-/, $unit);
+				if (!$from || !$to || $from > $to) {
+					print "Invalid range: $unit";
+					next;
+				}
+				push(@list, $from..$to);
+			}
+			# Simple listing (may be string)
+			else {
+				push(@list, $unit);
+			}
+		}
+	}
+	return \@list;
+}
+
+
+
+# ######################################################### 
+# CPU Management
+#
+
+# List all avaialble CPUs
+sub cpu_list {
+	my @cpus;
+	my $cpuinfo;
+	open($cpuinfo, "<", "/proc/cpuinfo");
+	while (<$cpuinfo>) {
+		if (/^processor.+: ([0-9]+)$/) {
+			push(@cpus,int($1));
+		}
+	}
+	close($cpuinfo);
+	return \@cpus;
+}
+
+# Display the CPU Masks in a visible way
+sub cpu_dispmask {
+	my ($cpulist, $affinity) = @_;
+	my $cpumask = list2mask($cpulist);
+	my $str = '';
+
+	while ($cpumask) {
+		if ($cpumask & 1) {
+			$str .= (($affinity & 1) ? " X " : "   ");
+		}
+		$affinity = $affinity >> 1;
+		$cpumask = $cpumask >> 1;
+	}
+	return $str;
+}
+
+
+# ######################################################### 
+# IRQ Management
+# 
+sub irq_available {
+	return ($> == 0);
+}
+
+sub irq_default {
+	return hex(normalize(filegetcontents("/proc/irq/default_smp_affinity")));
+}
+
+sub irq_list {
+	my @irqs;
+	my $irqinfo;
+
+	# Parse the /proc/interrupts listing
+	open($irqinfo, "<", "/proc/interrupts");
+	my $regex = "^([0-9 ]+):([0-9 ]+) +(.+)";
+	while (<$irqinfo>) {
+		# If the line matches a valid entry
+		if (/$regex/) {
+			# Get the real IRQ affinity
+			my $irqnum = int(normalize($1));
+			my $affinity = normalize(filegetcontents("/proc/irq/$irqnum/smp_affinity"));
+			
+			# and add all the data to the listing
+			push(@irqs,{
+				irq	=> $irqnum,
+				intr => [split(" ", normalize($2))],
+				name => normalize($3),
+				affinity => hex($affinity),
+
+			});
+		}
+	}
+	close($irqinfo);
+	return \@irqs;
+
+}
+
+sub irq_setaffinity {
+	my ($irq, $cpulist) = @_;
+	my $file = "/proc/irq/$irq/smp_affinity";
+	my $cpumask = sprintf("%x", list2mask($cpulist));
+	fileputcontents($file, $cpumask);
+	return (filegetcontents($file) eq $cpumask);
+}
+
+
+# ######################################################### 
+# Process management
+# 
+
+sub proc_available {
+	return (defined findbin('taskset'));
+}
+
+sub proc_list {
+	my (@pids) = @_;
+
+	# By default, select all of them
+	my $pssel = (@pids) ? "-p ".join(' ', @pids) : 'ax';
+
+	my @procs;
+	my @fields = qw(tid pid ppid user class rtprio nice pcpu pmem args);
+	my $pscmd = "ps -L -o ".join("=,", @fields)."= $pssel";
+	my $proc;
+	open($proc, "-|", $pscmd);
+	# Parse each line of ps
+	while (<$proc>) {
+		$_ = normalize($_);
+		my @data = split(/\s+/);
+		my %tmpdata;
+		
+		# Create the end array according the fields we requested in ps
+		# The last argument will take all remaining output (args mostly)
+		for my $i (0 .. ($#fields-1)) {
+			$tmpdata{$fields[$i]} = normalize($data[$i]);
+		}
+		splice(@data, 0, $#fields);
+		(@{$tmpdata{args}}) = @data;
+		
+		push(@procs, \%tmpdata);
+	}
+	close($proc);
+	return \@procs;
+}
+
+# TODO: Use an XS lib to use sched_{get,set}affinity 
+sub proc_getaffinity {
+	my $pid = shift;
+	my (@out) = split(/\s+/, qx($bin_taskset -p $pid 2>/dev/null));
+	
+	# If the process isnt visible or already gone
+	return if !@out;
+
+	# Return the mask if any
+	return hex(pop(@out));
+}
+
+sub proc_setaffinity {
+	my ($pid, $cpus) = @_;
+	my $cpumask = sprintf("0x%x", list2mask($cpus));
+	my (@out) = split(/\s+/, qx($bin_taskset -p $cpumask $pid 2>/dev/null));
+	my $newaff = pop(@out);
+	
+	return ($newaff eq $cpumask) ;
+}
+
+
+
+__END__
+=head1 NAME
+
+smp_affinity - Get and Set the affinity of IRQs and Processes
+
+=head1 SYNOPSIS
+
+smp_affinity [-ksdh] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs]
+
+ Options:
+  -i ALL
+
+
+=head1 EXAMPLES
+
