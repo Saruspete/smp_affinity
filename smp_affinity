@@ -50,6 +50,7 @@ my @opt_set_listproc;
 my $opt_set_distribute;
 
 my $bin_taskset = findbin('taskset');
+my $lib_sched = sched_dynload();
 
 
 # Parse options
@@ -63,6 +64,7 @@ GetOptions(
 	'k|kernel-threads'	=> \$opt_show_kthreads,
 	's|statistics'		=> \$opt_show_stats,
 	'q|quiet'			=> \$opt_show_quiet,
+
 	# Display filter lists
 	'c|show-cpus=s'		=> \@opt_show_listcpu,
 	'i|show-irq=s'		=> \@opt_show_listirq,
@@ -261,6 +263,7 @@ if (@opt_show_listproc) {
 			# Filter on non-stnadard affinities only
 			next if ($opt_show_onlydef && $affinity eq $proc_default );
 
+			#next if ($opt_show_listcount && $affinity < $opt_show_listcount)
 
 			my $text = (($proc->{tid} != $proc->{pid}) ? '    ' : '') . join(' ', @{$proc->{args}});
 
@@ -379,6 +382,13 @@ sub string2list {
 	return \@list;
 }
 
+sub sched_dynload {
+	eval "use Linux::CPUAffinity";
+	if ($@) {
+		return;
+	}
+	return 1;
+}
 
 
 # ######################################################### 
@@ -389,6 +399,8 @@ sub string2list {
 sub cpu_list {
 	my @cpus;
 	my $cpuinfo;
+	# TODO: replace this by Linux::CPUAffinity->num_processors
+	#       or fallback to /sys/devices/system/cpu/online
 	open($cpuinfo, "<", "/proc/cpuinfo");
 	while (<$cpuinfo>) {
 		if (/^processor.+: ([0-9]+)$/) {
@@ -470,6 +482,7 @@ sub irq_setaffinity {
 # 
 
 sub proc_available {
+	return 1 if ($lib_sched);
 	return (defined findbin('taskset'));
 }
 
@@ -512,16 +525,26 @@ sub proc_getdefault {
 	return cpu_list();
 }
 
-# TODO: Use an XS lib to use sched_{get,set}affinity 
 sub proc_getaffinity {
 	my $pid = shift;
-	my (@out) = split(/\s+/, qx($bin_taskset -p $pid 2>/dev/null));
-	
-	# If the process isnt visible or already gone
-	return if !@out;
 
-	# Return the mask if any
-	return hex(pop(@out));
+	# Use Perl internal scheduling lib if available (and not kernel thread)
+	my @sched_cpus;
+	if ($lib_sched && eval '@sched_cpus = @{Linux::CPUAffinity->get($pid)}' ) {
+		my $sum = 0;
+		map { $sum += (2**$_) } @sched_cpus;
+		return $sum;
+	}
+	# Fallback to regular taskset
+	else {
+		my (@out) = split(/\s+/, qx($bin_taskset -p $pid 2>/dev/null));
+
+		# If the process isnt visible or already gone
+		return if !@out;
+
+		# Return the mask if any
+		return hex(pop(@out));
+	}
 }
 
 sub proc_setaffinity {
