@@ -168,7 +168,7 @@ my @cpu_list = @{cpu_list()};
 my $cpu_count = $#cpu_list+1;
 
 # TODO Refine this list to take into account isolcpu param 
-my $proc_default = list2mask(\@cpu_list);
+my $proc_default = list2mask(proc_getdefault());
 my $irq_default = irq_default();
 
 # Calculations for column sizes
@@ -315,6 +315,7 @@ sub normalize {
 	$str =~ s/\t/ /g;
 	$str =~ s/\s+/ /g;
 	$str =~ s/(^\s*)|(\s*$)//g;
+	$str =~ s/,//g;
 	chomp($str);
 	return $str;
 }
@@ -501,6 +502,14 @@ sub proc_list {
 	}
 	close($proc);
 	return \@procs;
+}
+
+sub proc_getdefault {
+	my $cmd = filegetcontents('/proc/cmdline');
+	if (my ($res) = $cmd=~m/isolcpus=([0-9,]+)/g) {
+		return split(',', $res);
+	}
+	return cpu_list();
 }
 
 # TODO: Use an XS lib to use sched_{get,set}affinity 
