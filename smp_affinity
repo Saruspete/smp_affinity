@@ -518,11 +518,18 @@ sub proc_list {
 }
 
 sub proc_getdefault {
+	my @cpus = @{cpu_list()};
+
 	my $cmd = filegetcontents('/proc/cmdline');
 	if (my ($res) = $cmd=~m/isolcpus=([0-9,]+)/g) {
-		return split(',', $res);
+		my @isolated = split(',', $res);
+		my @cpusnew;
+		foreach my $cpu (@cpus) {
+			push(@cpusnew, $cpu) if (!inarray($cpu, @isolated));
+		}
+		@cpus = @cpusnew;
 	}
-	return cpu_list();
+	return \@cpus;
 }
 
 sub proc_getaffinity {
