@@ -38,12 +38,16 @@ my $opt_show_onlydef;
 my $opt_show_stats;
 my $opt_show_kthreads;
 my $opt_show_quiet;
+my $opt_show_count;
+my $opt_show_filter;
 
 my @opt_show_listcpu;
 my @opt_show_listirq;
 my @opt_show_listproc;
 my @opt_show_listuser;
+my @opt_show_listaffinity;
 
+my $opt_set_dry;
 my @opt_set_listcpu;
 my @opt_set_listirq;
 my @opt_set_listproc;
@@ -58,18 +62,24 @@ GetOptions(
 	# Help
 	'h|help'			=> \$opt_show_help,
 
-	# Display modifiers options
-	'm|modified-only'	=> \$opt_show_onlymod,
-	'd|defined-only'	=> \$opt_show_onlydef,
-	'k|kernel-threads'	=> \$opt_show_kthreads,
+	# Display format modifiers
 	's|statistics'		=> \$opt_show_stats,
 	'q|quiet'			=> \$opt_show_quiet,
-
-	# Display filter lists
 	'c|show-cpus=s'		=> \@opt_show_listcpu,
+
+	# Display filters
+	'd|defined-only'	=> \$opt_show_onlydef,
+	'a|affinity=s'		=> \@opt_show_listaffinity,
+	'k|kernel-threads'	=> \$opt_show_kthreads,
+	'f|filter=s'		=> \$opt_show_filter,
+	'r|show-count=s'	=> \$opt_show_count,
 	'i|show-irq=s'		=> \@opt_show_listirq,
 	'p|show-proc=s'		=> \@opt_show_listproc,
 	'u|show-user=s'		=> \@opt_show_listuser,
+
+	# Set related options
+	'm|show-modified'	=> \$opt_show_onlymod,
+	'dry|pretend'		=> \$opt_set_dry,
 
 	# Setting values
 	'C|set-cpu=s'		=> \@opt_set_listcpu,
@@ -98,8 +108,6 @@ if (@opt_show_listirq || @opt_set_listirq) {
 	}
 	@opt_show_listirq = @{string2list(\@opt_show_listirq)};
 	@opt_set_listirq  = @{string2list(\@opt_set_listirq)};
-
-	#@opt_set_listirq  = irq_list() if (inarray('ALL', @opt_set_listirq));
 }
 
 if (@opt_show_listproc || @opt_set_listproc) {
@@ -110,8 +118,6 @@ if (@opt_show_listproc || @opt_set_listproc) {
 	}
 	@opt_show_listproc  = @{string2list(\@opt_show_listproc)};
 	@opt_set_listproc   = @{string2list(\@opt_set_listproc)};
-	
-	#@opt_set_listproc  = proc_list() if (inarray('ALL', @opt_set_listproc));
 }
 
 if (@opt_set_listirq || @opt_set_listproc) {
@@ -121,6 +127,10 @@ if (@opt_set_listirq || @opt_set_listproc) {
 	}
 }
 
+if ($opt_show_onlymod && (@opt_show_listproc || @opt_show_listirq || @opt_show_listuser || @opt_show_listaffinity || $opt_show_filter || $opt_show_count ) ) {
+	print "You can't mix 'show-modified|m' with other filters\n";
+	exit(1);
+}
 
 # Defaults to all CPUs to display
 if (!@opt_show_listcpu) {
@@ -130,6 +140,7 @@ if (!@opt_show_listcpu) {
 # Do standard expansion
 @opt_set_listcpu  = @{string2list(\@opt_set_listcpu)};
 @opt_show_listcpu = @{string2list(\@opt_show_listcpu)};
+@opt_show_listaffinity = @{string2list(\@opt_show_listaffinity)};
 
 # Replace special values by their real listing
 @opt_set_listcpu  = @{cpu_list()} if (inarray('ALL', @opt_set_listcpu));
@@ -140,21 +151,42 @@ if (!@opt_show_listcpu) {
 # Set requested values
 #
 
+# Reset the display lists when displaying only modified elements
+if ($opt_show_onlymod) {
+	@opt_show_listproc = ();
+	@opt_show_listirq = ();
+}
 # IRQs
 if (@opt_set_listirq) {
-	
-	# 
 	foreach my $irq (@opt_set_listirq) {
-		irq_setaffinity($irq, \@opt_set_listcpu);
+		# Pretend to change...
+		if ($opt_set_dry) {
+			# Add to display list only if showing modified
+			if ($opt_show_onlymod && irq_getaffinity($irq) ne list2mask(\@opt_set_listcpu)) {
+				push(@opt_show_listirq, $irq);
+			}
+		}
+		# Set if not pretending
+		else {
+			irq_setaffinity($irq, \@opt_set_listcpu);
+		}
 	}
 }
 
 # Processes
 if (@opt_set_listproc) {
-	
-	# 
 	foreach my $pid (@opt_set_listproc) {
-		proc_setaffinity($pid, \@opt_set_listcpu);
+		# Pretend to change
+		if ($opt_set_dry) {
+			# Add to display list only if showing modified
+			if ($opt_show_onlymod && proc_getaffinity($pid) ne list2mask(\@opt_set_listcpu)) {
+				push(@opt_show_listproc, $pid);
+			}
+		}
+		# Set if not pretending
+		else {
+			proc_setaffinity($pid, \@opt_set_listcpu);
+		}
 	}
 }
 
@@ -166,10 +198,9 @@ if (@opt_set_listproc) {
 # Get some variables
 my $term_size = int(qx(/usr/bin/tput cols)) || 80;
 
-my @cpu_list = @{cpu_list()};
+my @cpu_list = @opt_show_listcpu;
 my $cpu_count = $#cpu_list+1;
 
-# TODO Refine this list to take into account isolcpu param 
 my $proc_default = list2mask(proc_getdefault());
 my $irq_default = irq_default();
 
@@ -195,7 +226,7 @@ my $body =	"%-${col_id}.${col_id}s" . $col_sep .
 
 
 # Show the header if not quiet
-if (!$opt_show_quiet) {
+if (!$opt_show_quiet && (@opt_show_listproc || @opt_show_listirq) ) {
 	# Print the header
 	printf($head, "ID", "Owner", "Description");
 	foreach my $cpu (@cpu_list) {
@@ -261,9 +292,26 @@ if (@opt_show_listproc) {
 			my $affinity = proc_getaffinity($proc->{tid}) || next;
 
 			# Filter on non-stnadard affinities only
-			next if ($opt_show_onlydef && $affinity eq $proc_default );
+			if ($opt_show_onlydef) {
+				
+				# Default CPU listing
+				next if ($affinity eq $proc_default);
+				
+				# Specific CPU affinity
+				my $cpumask = list2mask(\@opt_show_listaffinity);
+				if (@opt_show_listaffinity && $cpumask ne $proc_default) {
+					next if (! ( $affinity & $cpumask) );
+				}
+			}
 
-			#next if ($opt_show_listcount && $affinity < $opt_show_listcount)
+			# Filter by cpu affinity count
+			if ($opt_show_count) {
+				my $rangeDir = substr($opt_show_count, 0, 1);
+				# Less / More / Exactly
+				next if ($rangeDir eq '-' && $affinity > substr($opt_show_count, 1));
+				next if ($rangeDir eq '+' && $affinity < substr($opt_show_count, 1));
+				next if (int($opt_show_count) eq $opt_show_count && $affinity != $opt_show_count);
+			}
 
 			my $text = (($proc->{tid} != $proc->{pid}) ? '    ' : '') . join(' ', @{$proc->{args}});
 
@@ -309,6 +357,24 @@ sub findbin {
 sub inarray {
 	my $match = shift;
 	grep $_ eq $match, @_;
+}
+
+sub arrayize {
+	my @arrays = @_;
+	my @ret;
+	foreach $a (@arrays) {
+		my $r = ref($a);
+
+		# Scalar
+		if ($r eq '') {				@ret = (@ret, ($a));	}
+		# Refs
+		elsif ($r eq 'SCALAR') {	@ret = (@ret, ($$a));   }
+		elsif ($r eq 'ARRAY')  {	@ret = (@ret, @$a);  }
+		else {
+			print "Unknown ref ".$r."\n";
+		}
+	}
+	return \@ret;
 }
 
 # Normalize the spaces
@@ -538,9 +604,7 @@ sub proc_getaffinity {
 	# Use Perl internal scheduling lib if available (and not kernel thread)
 	my @sched_cpus;
 	if ($lib_sched && eval '@sched_cpus = @{Linux::CPUAffinity->get($pid)}' ) {
-		my $sum = 0;
-		map { $sum += (2**$_) } @sched_cpus;
-		return $sum;
+		return list2mask(\@sched_cpus);
 	}
 	# Fallback to regular taskset
 	else {
