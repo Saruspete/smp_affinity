@@ -587,8 +587,9 @@ sub proc_getdefault {
 	my @cpus = @{cpu_list()};
 
 	my $cmd = filegetcontents('/proc/cmdline');
-	if (my ($res) = $cmd=~m/isolcpus=([0-9,]+)/g) {
-		my @isolated = split(',', $res);
+	if (my ($res) = $cmd=~m/isolcpus=([0-9,-]+)/g) {
+
+		my @isolated = list2mask($res);
 		my @cpusnew;
 		foreach my $cpu (@cpus) {
 			push(@cpusnew, $cpu) if (!inarray($cpu, @isolated));
