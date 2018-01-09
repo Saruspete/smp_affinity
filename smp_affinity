@@ -55,6 +55,7 @@ my $opt_set_distribute;
 
 my $bin_taskset = findbin('taskset');
 my $lib_sched = sched_dynload();
+my $has_proclist = sched_checkproc();
 
 
 # Parse options
@@ -456,6 +457,15 @@ sub sched_dynload {
 	return 1;
 }
 
+sub sched_checkproc {
+	open my $fh, '<', "/proc/self/status" or return;
+	while (my $line = <$fh>) {
+		if ($line =~ /^Cpus_allowed:/) {
+			return 1;
+		}
+	}
+	return;
+}
 
 # ######################################################### 
 # CPU Management
@@ -549,12 +559,14 @@ sub irq_setaffinity {
 
 sub proc_available {
 	return 1 if ($lib_sched);
+	return 1 if ($has_proclist);
 	return (defined findbin('taskset'));
 }
 
 sub proc_list {
 	my (@pids) = @_;
 
+	# I could parse /proc/*/task/*  but ps is standard and does it for us...
 	# By default, select all of them
 	my $pssel = (@pids) ? "-p ".join(' ', @pids) : 'ax';
 
@@ -602,12 +614,24 @@ sub proc_getdefault {
 sub proc_getaffinity {
 	my $pid = shift;
 
-	# Use Perl internal scheduling lib if available (and not kernel thread)
 	my @sched_cpus;
+
+	# Use Perl internal scheduling lib if available
 	if ($lib_sched && eval '@sched_cpus = @{Linux::CPUAffinity->get($pid)}' ) {
 		return list2mask(\@sched_cpus);
 	}
-	# Fallback to regular taskset
+	# Check if the value is available in /proc/$pid/
+	# Yes, works also for non-leader threads, no need to /proc/$pid/task/$tid
+	elsif ($has_proclist && open my $fh, '<', "/proc/$pid/status") {
+		while (my $line = <$fh>) {
+			if ( my ($mask) = $line =~ m/^Cpus_allowed:\s+([0-9a-fA-F]+)/) {
+				close ($fh);
+				return hex($mask);
+			}
+		}
+		close($fh);
+	}
+	# Fallback to spawn a taskset process (slow)
 	else {
 		my (@out) = split(/\s+/, qx($bin_taskset -p $pid 2>/dev/null));
 
