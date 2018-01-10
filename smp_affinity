@@ -203,7 +203,6 @@ my @cpu_list = @opt_show_listcpu;
 my $cpu_count = $#cpu_list+1;
 
 my $proc_default = list2mask(proc_getdefault());
-my $irq_default = irq_default();
 
 # Calculations for column sizes
 my $col_sep = ' ';
@@ -241,6 +240,7 @@ if (!$opt_show_quiet && (@opt_show_listproc || @opt_show_listirq) ) {
 # Display IRQs
 if (@opt_show_listirq) {
 
+	my $irq_default = irq_default();
 	foreach my $irq (@{irq_list()}) {
 
 		# Filter on non-stnadard affinities only
