@@ -30,6 +30,12 @@ use Data::Dumper;
 use Getopt::Long qw(:config no_ignore_case gnu_compat bundling auto_help);
 use Pod::Usage;
 
+# One day at work, they asked me to install & prepare a Ryzen Epyc 2*32 cores..
+# well, a bitmap with 2^64 is a bit large. Thats 128 if SMT activated...
+# In /proc/irq/default_smp_affinity, it's shown as  8 * 64bits, let it be:
+# 1157920892373161954235709850086879078532699846656405640394575840079131296399350
+use Math::BigInt;
+
 my $opt_show_help;
 my $opt_show_sep = ' ';
 
@@ -512,7 +518,9 @@ sub irq_available {
 }
 
 sub irq_default {
-	return hex(normalize(filegetcontents("/proc/irq/default_smp_affinity")));
+	my $str = normalize(filegetcontents("/proc/irq/default_smp_affinity"));
+	my $dec = Math::BigInt->new("0x$str");
+	return $dec;
 }
 
 sub irq_list {
@@ -527,14 +535,16 @@ sub irq_list {
 		if (/$regex/) {
 			# Get the real IRQ affinity
 			my $irqnum = int(normalize($1));
-			my $affinity = normalize(filegetcontents("/proc/irq/$irqnum/smp_affinity"));
+			my $affinity = Math::BigInt->new(
+				"0x".normalize(filegetcontents("/proc/irq/$irqnum/smp_affinity"))
+			);
 			
 			# and add all the data to the listing
 			push(@irqs,{
 				irq	=> $irqnum,
 				intr => [split(" ", normalize($2))],
 				name => normalize($3),
-				affinity => hex($affinity),
+				affinity => $affinity,
 
 			});
 		}
@@ -624,9 +634,9 @@ sub proc_getaffinity {
 	# Yes, works also for non-leader threads, no need to /proc/$pid/task/$tid
 	elsif ($has_proclist && open my $fh, '<', "/proc/$pid/status") {
 		while (my $line = <$fh>) {
-			if ( my ($mask) = $line =~ m/^Cpus_allowed:\s+([0-9a-fA-F]+)/) {
+			if ( my ($mask) = $line =~ m/^Cpus_allowed:\s+([0-9a-fA-F,]+)/) {
 				close ($fh);
-				return hex($mask);
+				return Math::BigInt->new("0x".normalize($mask));
 			}
 		}
 		close($fh);
@@ -639,7 +649,7 @@ sub proc_getaffinity {
 		return if !@out;
 
 		# Return the mask if any
-		return hex(pop(@out));
+		return Math::BigInt->new(pop(@out));
 	}
 }
 
