@@ -219,6 +219,12 @@ my $col_cpu = $cpu_count * 3; # 3 cols / cpu
 # dyn column = term width -  1st col  - 2nd col     - last col   - 3 cols * 1 char separator
 my $col_text = $term_size - ($col_id) - ($col_name) - ($col_cpu) - (3*1) -1;
 
+if ($col_text <= 0) {
+	print "Your terminal is not wide enough to display the list for $cpu_count CPUs\n";
+	print "You're missing ".abs($col_text)." columns\n";
+	exit(1);
+}
+
 # lines formaters
 #my $head = "%-".($col_id+1+$col_name+1+$col_text+1)."s ";
 my $head =	"%-${col_id}s" 		. $col_sep .
