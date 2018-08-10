@@ -34,6 +34,10 @@ use Pod::Usage;
 # well, a bitmap with 2^64 is a bit large. Thats 128 if SMT activated...
 # In /proc/irq/default_smp_affinity, it's shown as  8 * 64bits, let it be:
 # 1157920892373161954235709850086879078532699846656405640394575840079131296399350
+# Size is done by include/linux/bitops.h :
+#   => BITS_TO_LONGS (nb_cpu)
+#   => DIV_ROUND_UP (nb_cpu, NBITS_PER_BYTE * sizeof(long))
+# TODO: Require Math::BigInt only if necessary
 use Math::BigInt;
 
 my $opt_show_help;
@@ -67,32 +71,32 @@ my $has_proclist = sched_checkproc();
 # Parse options
 GetOptions(
 	# Help
-	'h|help'			=> \$opt_show_help,
+	'h|help'            => \$opt_show_help,
 
 	# Display format modifiers
-	's|statistics'		=> \$opt_show_stats,
-	'q|quiet'			=> \$opt_show_quiet,
-	'c|show-cpus=s'		=> \@opt_show_listcpu,
+	's|statistics'      => \$opt_show_stats,
+	'q|quiet'           => \$opt_show_quiet,
+	'c|show-cpus=s'     => \@opt_show_listcpu,
 
 	# Display filters
-	'd|defined-only'	=> \$opt_show_onlydef,
-	'a|affinity=s'		=> \@opt_show_listaffinity,
-	'k|kernel-threads'	=> \$opt_show_kthreads,
-	'f|filter=s'		=> \$opt_show_filter,
-	'r|show-count=s'	=> \$opt_show_count,
-	'i|show-irq=s'		=> \@opt_show_listirq,
-	'p|show-proc=s'		=> \@opt_show_listproc,
-	'u|show-user=s'		=> \@opt_show_listuser,
+	'd|defined-only'    => \$opt_show_onlydef,
+	'a|affinity=s'      => \@opt_show_listaffinity,
+	'k|kernel-threads'  => \$opt_show_kthreads,
+	'f|filter=s'        => \$opt_show_filter,
+	'r|show-count=s'    => \$opt_show_count,
+	'i|show-irq=s'      => \@opt_show_listirq,
+	'p|show-proc=s'     => \@opt_show_listproc,
+	'u|show-user=s'     => \@opt_show_listuser,
 
 	# Set related options
-	'm|show-modified'	=> \$opt_show_onlymod,
-	'dry|pretend'		=> \$opt_set_dry,
+	'm|show-modified'   => \$opt_show_onlymod,
+	'dry|pretend'       => \$opt_set_dry,
 
 	# Setting values
-	'C|set-cpu=s'		=> \@opt_set_listcpu,
-	'I|set-irq=s'		=> \@opt_set_listirq,
-	'P|set-proc=s'		=> \@opt_set_listproc,
-	'D|distribute=i'	=> \$opt_set_distribute,
+	'C|set-cpu=s'       => \@opt_set_listcpu,
+	'I|set-irq=s'       => \@opt_set_listirq,
+	'P|set-proc=s'      => \@opt_set_listproc,
+	'D|distribute=i'    => \$opt_set_distribute,
 ) or die ('Error while parsing options. Stopping');
 
 pod2usage(-verbose=>2) if $opt_show_help;
@@ -595,7 +599,7 @@ sub proc_list {
 	my $pssel = (@pids) ? "-p ".join(' ', @pids) : 'ax';
 
 	my @procs;
-	my @fields = qw(tid pid ppid user class rtprio nice pcpu pmem args);
+	my @fields = qw(tid pid ppid user class rtprio nice pcpu pmem comm args);
 	my $pscmd = "ps -L -o ".join("=,", @fields)."= $pssel";
 	my $proc;
 	open($proc, "-|", $pscmd);
