@@ -330,7 +330,11 @@ if (@opt_show_listproc) {
 				next if (int($opt_show_count) eq $opt_show_count && $affinity != $opt_show_count);
 			}
 
-			my $text = (($proc->{tid} != $proc->{pid}) ? '    ' : '') . join(' ', @{$proc->{args}});
+			my $text = join(' ', @{$proc->{args}});
+			# If it's not the thread leader, offset it and change the text
+			if (($proc->{tid} != $proc->{pid})) {
+				$text = '    ' . $proc->{comm};
+			}
 
 			# Add more statistics before
 			if ($opt_show_stats) {
