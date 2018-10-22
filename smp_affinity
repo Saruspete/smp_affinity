@@ -1,18 +1,20 @@
 #!/usr/bin/perl
 
-
 # #############################################################################
 # smp_affinity.pl - Utility to get/set affinities of IRQs and Processes
-# 
+#
+# - Display CPU affinity for IRQ & Processes
+# - Set distributed patterns from keywords
+#
 # Author : Adrien Mahieux <adrien.mahieux@gmail.com>
-# 
+#
 # #############################################################################
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -49,6 +51,7 @@ my $opt_show_stats;
 my $opt_show_kthreads;
 my $opt_show_quiet;
 my $opt_show_count;
+# TODO: Add filtering
 my $opt_show_filter;
 
 my @opt_show_listcpu;
@@ -212,6 +215,8 @@ my $term_size = int(qx(/usr/bin/tput cols)) || 80;
 my @cpu_list = @opt_show_listcpu;
 my $cpu_count = $#cpu_list+1;
 
+my $sys_cpu_mask = list2mask(cpu_list());
+
 my $proc_default = list2mask(proc_getdefault());
 
 # Calculations for column sizes
@@ -231,11 +236,11 @@ if ($col_text <= 0) {
 
 # lines formaters
 #my $head = "%-".($col_id+1+$col_name+1+$col_text+1)."s ";
-my $head =	"%-${col_id}s" 		. $col_sep .
-			"%-${col_name}s"	. $col_sep .
-			"%-${col_text}s "	. $col_sep;
+my $head =	"%-${col_id}s"    . $col_sep .
+			"%-${col_name}s"  . $col_sep .
+			"%-${col_text}s " . $col_sep;
 
-my $body =	"%-${col_id}.${col_id}s" . $col_sep .
+my $body =	"%-${col_id}.${col_id}s"     . $col_sep .
 			"%-${col_name}.${col_name}s" . $col_sep .
 			"%-${col_text}.${col_text}s" . $col_sep .
 			" %s";
@@ -271,9 +276,9 @@ if (@opt_show_listirq) {
 				$text .= "";
 			}
 
-			printf($body."\n", 
+			printf($body."\n",
 					$irq->{irq},
-					'', 
+					'',
 					$text,
 					cpu_dispmask(\@opt_show_listcpu, $irq->{affinity})
 				);
@@ -288,10 +293,10 @@ if (@opt_show_listproc) {
 	# Order the process list - I bet you love Schwartzian transform :)
 	my @proclist =	map { $_->[2] }
 					sort { $a->[1] <=> $b->[1] || $a->[0] <=> $b->[0] }
-					map { [int($_->{pid}), (int($_->{ppid}||0) eq 2)? 0 : ($_->{ppid}||0), $_] } 
+					map { [int($_->{pid}), (int($_->{ppid}||0) eq 2)? 0 : ($_->{ppid}||0), $_] }
 					@{proc_list()};
-	
-	
+
+
 	# Walk on each process
 	foreach my $proc (@proclist) {
 
@@ -304,16 +309,16 @@ if (@opt_show_listproc) {
 		if (inarray('ALL', @opt_show_listproc) ||
 			inarray($proc->{tid}, @opt_show_listproc) ||
 			inarray($proc->{pid}, @opt_show_listproc) ) {
-			
+
 			# Skip elements where we don't have affinity
 			my $affinity = proc_getaffinity($proc->{tid}) || next;
 
 			# Filter on non-stnadard affinities only
 			if ($opt_show_onlydef) {
-				
+
 				# Default CPU listing
 				next if ($affinity eq $proc_default);
-				
+
 				# Specific CPU affinity
 				my $cpumask = list2mask(\@opt_show_listaffinity);
 				if (@opt_show_listaffinity && $cpumask ne $proc_default) {
@@ -340,13 +345,13 @@ if (@opt_show_listproc) {
 			if ($opt_show_stats) {
 				$text = sprintf("%s %-2s %-4s %-4s", $proc->{class}, $proc->{rtprio}, $proc->{pcpu}, $proc->{pmem})." $text";
 			}
-			
+
 			# Finally, display
-			printf($body."\n", 
+			printf($body."\n",
 					$proc->{tid},
 					$proc->{user},
 					$text,
-					cpu_dispmask(\@opt_show_listcpu, $affinity), 
+					cpu_dispmask(\@opt_show_listcpu, $affinity),
 				);
 		}
 	}
@@ -387,10 +392,10 @@ sub arrayize {
 		my $r = ref($a);
 
 		# Scalar
-		if ($r eq '') {				@ret = (@ret, ($a));	}
+		if ($r eq '') {          @ret = (@ret, ($a));  }
 		# Refs
-		elsif ($r eq 'SCALAR') {	@ret = (@ret, ($$a));   }
-		elsif ($r eq 'ARRAY')  {	@ret = (@ret, @$a);  }
+		elsif ($r eq 'SCALAR') { @ret = (@ret, ($$a)); }
+		elsif ($r eq 'ARRAY')  { @ret = (@ret, @$a);  }
 		else {
 			print "Unknown ref ".$r."\n";
 		}
@@ -560,12 +565,12 @@ sub irq_list {
 			my $affinity = Math::BigInt->new(
 				"0x".normalize(filegetcontents("/proc/irq/$irqnum/smp_affinity"))
 			);
-			
+
 			# and add all the data to the listing
 			push(@irqs,{
-				irq	=> $irqnum,
-				intr => [split(" ", normalize($2))],
-				name => normalize($3),
+				irq      => $irqnum,
+				intr     => [split(" ", normalize($2))],
+				name     => normalize($3),
 				affinity => $affinity,
 
 			});
@@ -612,7 +617,7 @@ sub proc_list {
 		$_ = normalize($_);
 		my @data = split(/\s+/);
 		my %tmpdata;
-		
+
 		# Create the end array according the fields we requested in ps
 		# The last argument will take all remaining output (args mostly)
 		for my $i (0 .. ($#fields-1)) {
@@ -658,7 +663,7 @@ sub proc_getaffinity {
 		while (my $line = <$fh>) {
 			if ( my ($mask) = $line =~ m/^Cpus_allowed:\s+([0-9a-fA-F,]+)/) {
 				close ($fh);
-				return Math::BigInt->new("0x".normalize($mask));
+				return Math::BigInt->new("0x".normalize($mask)) & $sys_cpu_mask;
 			}
 		}
 		close($fh);
@@ -680,7 +685,7 @@ sub proc_setaffinity {
 	my $cpumask = sprintf("0x%x", list2mask($cpus));
 	my (@out) = split(/\s+/, qx($bin_taskset -p $cpumask $pid 2>/dev/null));
 	my $newaff = pop(@out);
-	
+
 	return ($newaff eq $cpumask) ;
 }
 
