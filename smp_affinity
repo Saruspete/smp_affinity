@@ -83,7 +83,7 @@ GetOptions(
 	# Display filters
 	'd|defined-only'    => \$opt_show_onlydef,
 	'k|kernel-threads'  => \$opt_show_kthreads,
-	'f|filter=s'        => \$opt_show_filter,
+	#'f|filter=s'        => \$opt_show_filter,
 	'r|show-count=s'    => \$opt_show_count,
 	'i|show-irq=s'      => \@opt_show_listirq,
 	'p|show-proc=s'     => \@opt_show_listproc,
@@ -707,8 +707,24 @@ smp_affinity - Get and Set the affinity of IRQs and Processes
 smp_affinity [-ksdh] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs]
 
  Options:
-  -i ALL
+  -i|--show-irq LIST   Show interrupts with IRQ number in LIST
+  -p|--show-proc LIST  Show process with PID in LIST
+  -c|--show-cpus LIST  Filter on the CPUs list to display
+  -s|--statistics      Show statistics (%cpu,%mem,sched,state) for process or
+                       show interrupt count for IRQs
+  -k|--kernel-threads  Show kernel threads
+  -d|--defined-only    Only show tasks/irqs with non-standard affinity
 
+  -I|--set-irq LIST    Set the affinity of interrupt in LIST to CPUs listed by -C
+  -P|--set-proc LIST   Set the affinity of processes in LIST to CPUs listed by -C
+  -C|--set-proc LIST   Set LIST of CPUs on which to bind given processes or interrupts
+
+  LIST can be a combination of list and sequences of numbers, or keyword 'ALL':
+    1,2,3,4              Explicit listing
+    1-4                  Sequence, equivalent to the previous list
+    1,2,3,4,6,10,11,12   Explicit listing
+    1-4,6,10-12          Combined sequence + listing, same as previous list
+    ALL                  Special keyword to match all
 
 =head1 EXAMPLES
 
