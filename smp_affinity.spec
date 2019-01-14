@@ -1,5 +1,5 @@
 Name:       smp_affinity
-Version:    1.1
+Version:    1.2
 Release:    1%{?dist}
 Summary:    List and configure CPU affinity of process and interrupts
 
@@ -10,8 +10,8 @@ URL:        https://github.com/saruspete/smp_affinity
 Source0:    https://github.com/saruspete/%{name}/archive/%{version}.tar.gz
 
 #BuildRequires:
-Requires:   perl-interpreter
-Requires:   perl-Math-BigInt
+Requires:   /usr/bin/perl
+#Requires:   perl-Math-BigInt
 
 %define     debug_package %{nil}
 
