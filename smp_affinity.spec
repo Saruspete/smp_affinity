@@ -1,5 +1,5 @@
 Name:       smp_affinity
-Version:    1.2
+Version:    1.2.1
 Release:    1%{?dist}
 Summary:    List and configure CPU affinity of process and interrupts
 
