@@ -108,8 +108,7 @@ pod2usage(-verbose=>2) if $opt_show_help;
 #
 # #############################################################################
 
-
-# #########################################################
+#
 # Pre-checks and command line parsing
 #
 
@@ -122,12 +121,17 @@ if (@opt_show_listirq || @opt_set_listirq) {
 	@opt_set_listirq  = @{liststring2list(\@opt_set_listirq)};
 }
 
+
+#
+# Processes listing
+#
 if (@opt_show_listproc || @opt_set_listproc) {
 	if ( !proc_available() ) {
 		print "The Process management is not available\n";
 		print "Be sure the program 'taskset' is installed on this system\n";
 		exit(1);
 	}
+
 	@opt_show_listproc  = @{liststring2list(\@opt_show_listproc)};
 	@opt_set_listproc   = @{liststring2list(\@opt_set_listproc)};
 }
@@ -227,7 +231,7 @@ my $proc_default = list2mask(cpu_getdefault());
 
 # Calculations for column sizes
 my $col_sep = ' ';
-my $col_id  = 5;
+my $col_id  = 6;
 my $col_name = 8;
 my $col_cpu = $cpu_count * 3; # 3 cols / cpu
 
