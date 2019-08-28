@@ -150,13 +150,20 @@ if (!@opt_show_listcpu) {
 }
 
 # Do standard expansion
-@opt_set_listcpu  = @{liststring2list(\@opt_set_listcpu)};
-@opt_show_listcpu = @{liststring2list(\@opt_show_listcpu)};
+@opt_set_listcpu   = @{liststring2list(\@opt_set_listcpu)};
+@opt_show_listcpu  = @{liststring2list(\@opt_show_listcpu)};
 
 # Replace special values by their real listing
-@opt_set_listcpu  = @{cpu_list()} if (inarray('ALL', @opt_set_listcpu));
-@opt_show_listcpu = @{cpu_list()} if (inarray('ALL', @opt_show_listcpu));
+@opt_set_listcpu   = @{cpu_list()}        if (inarray('ALL', @opt_set_listcpu));
+@opt_show_listcpu  = @{cpu_list()}        if (inarray('ALL', @opt_show_listcpu));
+@opt_set_listcpu   = @{cpu_getisolated()} if (inarray('ISOLATED', @opt_set_listcpu));
+@opt_show_listcpu  = @{cpu_getisolated()} if (inarray('ISOLATED', @opt_show_listcpu));
+@opt_set_listcpu   = @{cpu_getdefault()}  if (inarray('NOTISOLATED', @opt_set_listcpu));
+@opt_show_listcpu  = @{cpu_getdefault()}  if (inarray('NOTISOLATED', @opt_show_listcpu));
 
+
+#@opt_set_listproc  = @{proc_getaffinitized()} if (inarray('NONSTANDARD', @opt_set_listproc));
+#@opt_show_listproc = @{proc_getaffinitized()} if (inarray('NONSTANDARD', @opt_show_listproc));
 
 # #########################################################
 # Set requested values
@@ -216,7 +223,7 @@ my $cpu_count = $#cpu_list+1;
 my $cpu_mask_show = list2mask(\@opt_show_listcpu);
 my $cpu_mask_sys = list2mask(cpu_list());
 
-my $proc_default = list2mask(proc_getdefault());
+my $proc_default = list2mask(cpu_getdefault());
 
 # Calculations for column sizes
 my $col_sep = ' ';
@@ -542,10 +549,33 @@ sub cpu_dispmask {
 	return $str;
 }
 
+sub cpu_getisolated {
+	my @cpus;
+	my $cmd = filegetcontents('/proc/cmdline');
+	if (my ($res) = $cmd=~m/isolcpus=([0-9,-]+)/g) {
+		my @isolated = @{string2list($res)};
+		foreach my $cpu (@{cpu_list()}) {
+			push(@cpus, $cpu) if (inarray($cpu, @isolated));
+		}
+	}
+	return \@cpus;
 
-# ######################################################### 
+}
+
+sub cpu_getdefault {
+	my @cpusdef;
+	my @cpusisol = @{cpu_getisolated()};
+
+	foreach my $cpu (@{cpu_list()}) {
+		push(@cpusdef, $cpu) if (!inarray($cpu, @cpusisol));
+	}
+	return \@cpusdef;
+}
+
+
+# #########################################################
 # IRQ Management
-# 
+#
 sub irq_available {
 	return ($> == 0);
 }
@@ -636,22 +666,6 @@ sub proc_list {
 	}
 	close($proc);
 	return \@procs;
-}
-
-sub proc_getdefault {
-	my @cpus = @{cpu_list()};
-
-	my $cmd = filegetcontents('/proc/cmdline');
-	if (my ($res) = $cmd=~m/isolcpus=([0-9,-]+)/g) {
-
-		my @isolated = @{string2list($res)};
-		my @cpusnew;
-		foreach my $cpu (@cpus) {
-			push(@cpusnew, $cpu) if (!inarray($cpu, @isolated));
-		}
-		@cpus = @cpusnew;
-	}
-	return \@cpus;
 }
 
 sub proc_getaffinity {
