@@ -144,7 +144,7 @@ if (@opt_set_listirq || @opt_set_listproc) {
 }
 
 if ($opt_show_onlymod && (@opt_show_listproc || @opt_show_listirq || @opt_show_listuser || $opt_show_filter || $opt_show_count ) ) {
-	print "You can't mix 'show-modified|m' with other filters\n";
+	print "You can't mix 'show-modified|m' with other filters (-d,-p,-i,-u,-c)\n";
 	exit(1);
 }
 
