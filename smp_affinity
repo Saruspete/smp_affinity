@@ -700,7 +700,10 @@ sub proc_list {
 	my $pssel = (@pids) ? "-p ".join(' ', @pids) : 'ax';
 
 	my @procs;
-	my @fields = qw(tid pid ppid user class rtprio nice pcpu pmem comm args);
+	# args *must* be last and will not be normalized
+	# ilibc6 sets max username size to 32
+	# pthread sets thread name max to 16
+	my @fields = qw(tid pid ppid user:32 class rtprio nice pcpu pmem comm:16 args);
 	my $pscmd = "ps -L -o ".join("=,", @fields)."= $pssel";
 	my $proc;
 	open($proc, "-|", $pscmd);
@@ -713,11 +716,13 @@ sub proc_list {
 		# Create the end array according the fields we requested in ps
 		# The last argument will take all remaining output (args mostly)
 		for my $i (0 .. ($#fields-1)) {
-			$tmpdata{$fields[$i]} = normalize($data[$i]);
+			# Remove the potential ":colsize" for ps output
+			my $field = (split(/:/,$fields[$i]))[0];
+			$tmpdata{$field} = normalize($data[$i]);
 		}
 		splice(@data, 0, $#fields);
 		(@{$tmpdata{args}}) = @data;
-		
+
 		push(@procs, \%tmpdata);
 	}
 	close($proc);
