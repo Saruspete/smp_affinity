@@ -1,5 +1,5 @@
 Name:       smp_affinity
-Version:    1.2.1
+Version:    1.3.0
 Release:    1%{?dist}
 Summary:    List and configure CPU affinity of process and interrupts
 
@@ -23,7 +23,7 @@ Requires:   /usr/bin/perl
 # Complete description of the package
 # =============================================================================
 %description
-
+Display and configure affinity of processes and IRQs
 
 # =============================================================================
 # Preparation of the build environment
