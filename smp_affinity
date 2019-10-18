@@ -819,7 +819,7 @@ smp_affinity - Get and Set the affinity of IRQs and Processes
 
 =head1 SYNOPSIS
 
-smp_affinity [-ksdh] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs]
+smp_affinity [-ksdh] [--nocolor] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs]
 
  Options:
   -i|--show-irq LIST   Show interrupts with IRQ number in LIST
@@ -827,6 +827,7 @@ smp_affinity [-ksdh] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs]
   -c|--show-cpus LIST  Filter on the CPUs list to display
   -s|--statistics      Show statistics (%cpu,%mem,sched,state) for process or
                        show interrupt count for IRQs
+     --nocolor         Don't use colored output (auto-selected if not a tty)
   -k|--kernel-threads  Show kernel threads
   -d|--defined-only    Only show tasks/irqs with non-standard affinity
 
@@ -840,6 +841,10 @@ smp_affinity [-ksdh] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs]
     1,2,3,4,6,10,11,12   Explicit listing
     1-4,6,10-12          Combined sequence + listing, same as previous list
     ALL                  Special keyword to match all
+
+  CPUs lists can also have special keywords:
+    ISOLATED             All isolated cores
+    NONISOLATED          Non-isolated cores
 
 =head1 EXAMPLES
 
