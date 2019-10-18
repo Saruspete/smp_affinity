@@ -115,8 +115,8 @@ my $chr_cpuisoloff = " ";
 
 # Use red background to display isolated cores
 if ($has_color) {
-	$chr_cpuisolon  = "\e[41m" . $chr_cpuisolon  . "\e[0m";
-	$chr_cpuisoloff = "\e[41m" . $chr_cpuisoloff . "\e[0m";
+	$chr_cpuisolon  = "\e[41;1m" . $chr_cpuisolon  . "\e[0m";
+	$chr_cpuisoloff = "\e[41;1m" . $chr_cpuisoloff . "\e[0m";
 }
 # If no color, most likely batch mode, thus provide fixed line length (no space)
 else {
@@ -632,7 +632,7 @@ sub cpu_dispmask {
 
 			# If CPU is isolated
 			if ($cpu_isolatedmask & $bittest) {
-				$str .= (($affinity & $bittest) ? " $chr_cpuisolon " : " $chr_cpuisoloff  ");
+				$str .= (($affinity & $bittest) ? " $chr_cpuisolon " : " $chr_cpuisoloff ");
 			}
 			else {
 				$str .= (($affinity & $bittest) ? " $chr_cpustdon " : " $chr_cpustdoff ");
