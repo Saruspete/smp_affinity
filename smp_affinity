@@ -9,7 +9,7 @@
 # Author : Adrien Mahieux <adrien.mahieux@gmail.com>
 #
 # #############################################################################
-# 
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -31,6 +31,7 @@ use warnings;
 use Data::Dumper;
 use Getopt::Long qw(:config no_ignore_case gnu_compat bundling auto_help);
 use Pod::Usage;
+use List::Util qw(max);
 
 # One day at work, they asked me to install & prepare a Ryzen Epyc 2*32 cores..
 # well, a bitmap with 2^64 is a bit large. Thats 128 if SMT activated...
@@ -69,7 +70,9 @@ my $bin_taskset = findbin('taskset');
 my $lib_sched = sched_dynload();
 my $has_proclist = sched_checkproc();
 my $chk_userlisthasregex = 0;
-
+my $has_color = (-t STDOUT) ? 1 : 0;
+my @cpu_isolatedlist = @{cpu_getisolated()};
+my $cpu_isolatedmask = list2mask(\@cpu_isolatedlist);
 
 # Parse options
 GetOptions(
@@ -80,6 +83,7 @@ GetOptions(
 	's|statistics'      => \$opt_show_stats,
 	'q|quiet'           => \$opt_show_quiet,
 	'c|show-cpus=s'     => \@opt_show_listcpu,
+	'color!'            => \$has_color,
 
 	# Display filters
 	'd|defined-only'    => \$opt_show_onlydef,
@@ -102,6 +106,23 @@ GetOptions(
 ) or die ('Error while parsing options. Stopping');
 
 pod2usage(-verbose=>2) if $opt_show_help;
+
+
+my $chr_cpustdon   = "X";
+my $chr_cpustdoff  = " ";
+my $chr_cpuisolon  = "I";
+my $chr_cpuisoloff = " ";
+
+# Use red background to display isolated cores
+if ($has_color) {
+	$chr_cpuisolon  = "\e[41m" . $chr_cpuisolon  . "\e[0m";
+	$chr_cpuisoloff = "\e[41m" . $chr_cpuisoloff . "\e[0m";
+}
+# If no color, most likely batch mode, thus provide fixed line length (no space)
+else {
+	$chr_cpuisoloff = "-";
+	$chr_cpustdoff  = ".";
+}
 
 # #############################################################################
 #
@@ -161,6 +182,9 @@ foreach my $user (@opt_show_listuser) {
 if (!@opt_show_listcpu) {
 	@opt_show_listcpu = @{cpu_list()};
 }
+if (!@opt_show_listproc) {
+	@opt_show_listproc = 'ALL';
+}
 
 # Do standard expansion
 @opt_set_listcpu   = @{liststring2list(\@opt_set_listcpu)};
@@ -169,14 +193,15 @@ if (!@opt_show_listcpu) {
 # Replace special values by their real listing
 @opt_set_listcpu   = @{cpu_list()}        if (inarray('ALL', @opt_set_listcpu));
 @opt_show_listcpu  = @{cpu_list()}        if (inarray('ALL', @opt_show_listcpu));
-@opt_set_listcpu   = @{cpu_getisolated()} if (inarray('ISOLATED', @opt_set_listcpu));
-@opt_show_listcpu  = @{cpu_getisolated()} if (inarray('ISOLATED', @opt_show_listcpu));
+@opt_set_listcpu   = @cpu_isolatedlist    if (inarray('ISOLATED', @opt_set_listcpu));
+@opt_show_listcpu  = @cpu_isolatedlist    if (inarray('ISOLATED', @opt_show_listcpu));
 @opt_set_listcpu   = @{cpu_getdefault()}  if (inarray('NOTISOLATED', @opt_set_listcpu));
 @opt_show_listcpu  = @{cpu_getdefault()}  if (inarray('NOTISOLATED', @opt_show_listcpu));
 
 
 #@opt_set_listproc  = @{proc_getaffinitized()} if (inarray('NONSTANDARD', @opt_set_listproc));
 #@opt_show_listproc = @{proc_getaffinitized()} if (inarray('NONSTANDARD', @opt_show_listproc));
+
 
 # #########################################################
 # Set requested values
@@ -595,12 +620,27 @@ sub cpu_dispmask {
 	my $cpumask = list2mask($cpulist);
 	my $str = '';
 
-	while ($cpumask) {
-		if ($cpumask & 1) {
-			$str .= (($affinity & 1) ? " X " : "   ");
+	# Track cpuid to get isolated CPUs
+	my $cpuid = 0;
+	my $cpumax = max(@$cpulist);
+	my $bittest = 1;
+	# Loop on all available CPUs to keep CPUID in sync
+	while ($cpuid <= $cpumax) {
+
+		# Filter on CPU to display
+		if ($cpumask & $bittest) {
+
+			# If CPU is isolated
+			if ($cpu_isolatedmask & $bittest) {
+				$str .= (($affinity & $bittest) ? " $chr_cpuisolon " : " $chr_cpuisoloff  ");
+			}
+			else {
+				$str .= (($affinity & $bittest) ? " $chr_cpustdon " : " $chr_cpustdoff ");
+			}
 		}
-		$affinity = $affinity >> 1;
-		$cpumask = $cpumask >> 1;
+
+		$cpuid++;
+		$bittest = $bittest << 1;
 	}
 	return $str;
 }
