@@ -199,6 +199,26 @@ if (!@opt_show_listproc) {
 @opt_show_listcpu  = @{cpu_getdefault()}  if (inarray('NOTISOLATED', @opt_show_listcpu));
 
 
+# Check if all values were correctly expanded
+my %checkvars = (
+	'-c|--show-cpu'  => \@opt_show_listcpu,
+	'-p|--show-proc' => \@opt_show_listproc,
+	'-i|--show-irq'  => \@opt_show_listirq,
+	'-C|--set-cpu'   => \@opt_set_listcpu,
+	'-P|--set-proc'  => \@opt_set_listproc,
+	'-I|--set-irq'   => \@opt_set_listirq,
+);
+my $chk_haserr = 0;
+for my $chkopt (keys %checkvars) {
+	my $chkvar = $checkvars{$chkopt};
+	my @invalid = @{check_listinvalid(@$chkvar)};
+	if (@invalid) {
+		print("Error: Invalid value(s) for $chkopt: " . join(', ', @invalid)."\n");
+		$chk_haserr++;
+	}
+}
+exit(1) if $chk_haserr;
+
 #@opt_set_listproc  = @{proc_getaffinitized()} if (inarray('NONSTANDARD', @opt_set_listproc));
 #@opt_show_listproc = @{proc_getaffinitized()} if (inarray('NONSTANDARD', @opt_show_listproc));
 
@@ -457,7 +477,7 @@ if (@opt_show_listproc) {
 # #############################################################################
 #
 # Working subs : The magic happens here
-# 
+#
 # #############################################################################
 
 
@@ -575,6 +595,22 @@ sub string2list {
 	}
 	return \@list;
 }
+
+sub check_listinvalid {
+
+	my @ret;
+	# Check if all element is a number
+	if (! (join(',', @_) =~ /^([0-9]+|ALL)(,[,0-9]+)*$/)) {
+		foreach my $var (@_) {
+			if (! ($var =~ /^[0-9]+$/)) {
+				push(@ret, $var);
+			}
+		}
+	}
+
+	return \@ret;
+}
+
 
 sub sched_dynload {
 	eval "use Linux::CPUAffinity";
@@ -710,7 +746,6 @@ sub irq_list {
 	}
 	close($irqinfo);
 	return \@irqs;
-
 }
 
 sub irq_setaffinity {
@@ -844,7 +879,7 @@ smp_affinity [-ksdh] [--nocolor] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs
 
   CPUs lists can also have special keywords:
     ISOLATED             All isolated cores
-    NONISOLATED          Non-isolated cores
+    NOTISOLATED          Non-isolated cores
 
 =head1 EXAMPLES
 
