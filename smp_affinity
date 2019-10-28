@@ -48,6 +48,9 @@ my $opt_show_sep = ' ';
 
 my $opt_show_onlymod;
 my $opt_show_onlydef;
+my $opt_show_pctcpu;
+my $opt_show_pctmem;
+my $opt_show_realtime;
 my $opt_show_stats;
 my $opt_show_kthreads;
 my $opt_show_quiet;
@@ -73,6 +76,7 @@ my $chk_userlisthasregex = 0;
 my $has_color = (-t STDOUT) ? 1 : 0;
 my @cpu_isolatedlist = @{cpu_getisolated()};
 my $cpu_isolatedmask = list2mask(\@cpu_isolatedlist);
+my @cpu_schedrt = ['FF','RR'];
 
 # Parse options
 GetOptions(
@@ -88,6 +92,9 @@ GetOptions(
 	# Display filters
 	'd|defined-only'    => \$opt_show_onlydef,
 	'k|kernel-threads'  => \$opt_show_kthreads,
+	'pctcpu=s'          => \$opt_show_pctcpu,
+	'pctmem=s'          => \$opt_show_pctmem,
+	'rt|realtime'       => \$opt_show_realtime,
 	#'f|filter=s'        => \$opt_show_filter,
 	'r|show-count=s'    => \$opt_show_count,
 	'i|show-irq=s'      => \@opt_show_listirq,
@@ -447,6 +454,23 @@ if (@opt_show_listproc) {
 				next if ($rangeDir eq '-' && $affinity > substr($opt_show_count, 1));
 				next if ($rangeDir eq '+' && $affinity < substr($opt_show_count, 1));
 				next if (int($opt_show_count) eq $opt_show_count && $affinity != $opt_show_count);
+			}
+
+			# Filter by CPU Usage
+			if ($opt_show_pctcpu) {
+				my $cpuVal = int($opt_show_pctcpu);
+				next if ($cpuVal < 0) && int($proc->{pcpu}) > -$cpuVal;
+				next if ($cpuVal >= 0) && int($proc->{pcpu}) < $cpuVal;
+			}
+			# Filter by memory Usage
+			if ($opt_show_pctmem) {
+				my $memVal = int($opt_show_pctmem);
+				next if ($memVal < 0) && int($proc->{pmem}) > -$memVal;
+				next if ($memVal >= 0) && int($proc->{pmem}) < $memVal;
+			}
+			# Filter by realtime
+			if ($opt_show_realtime) {
+				next if (!inarray($proc->{class}, @cpu_schedrt));
 			}
 
 			my $text = join(' ', @{$proc->{args}});
