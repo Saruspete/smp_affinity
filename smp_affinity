@@ -481,7 +481,7 @@ if (@opt_show_listproc) {
 
 			# Add more statistics before
 			if ($opt_show_stats) {
-				$text = sprintf("%s %-2s %-4s %-4s", $proc->{class}, $proc->{rtprio}, $proc->{pcpu}, $proc->{pmem})." $text";
+				$text = sprintf("%-3s %-2s %-4s %-4s %-1s", $proc->{class}, $proc->{rtprio} || "-", $proc->{pcpu}, $proc->{pmem}, $proc->{s})." $text";
 			}
 
 			# Finally, display
@@ -802,7 +802,7 @@ sub proc_list {
 	# args *must* be last and will not be normalized
 	# ilibc6 sets max username size to 32
 	# pthread sets thread name max to 16
-	my @fields = qw(tid pid ppid user:32 class rtprio nice pcpu pmem comm:16 args);
+	my @fields = qw(tid pid ppid user:32 class rtprio nice pcpu pmem s comm:16 args);
 	my $pscmd = "ps -L -o ".join("=,", @fields)."= $pssel";
 	my $proc;
 	open($proc, "-|", $pscmd);
