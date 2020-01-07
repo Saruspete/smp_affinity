@@ -184,13 +184,16 @@ foreach my $user (@opt_show_listuser) {
 	}
 }
 
-
-# Defaults to all CPUs to display
-if (!@opt_show_listcpu) {
-	@opt_show_listcpu = @{cpu_list()};
-}
-if (!@opt_show_listproc) {
-	@opt_show_listproc = 'ALL';
+# Only apply show defaults if no set action is requested
+if (!@opt_set_listirq && !@opt_set_listproc) {
+	# Defaults to all CPUs to display
+	if (!@opt_show_listcpu) {
+		@opt_show_listcpu = @{cpu_list()};
+	}
+	# Defaults to all process to display
+	if (!@opt_show_listproc) {
+		@opt_show_listproc = 'ALL';
+	}
 }
 
 # Do standard expansion
@@ -268,6 +271,7 @@ if (@opt_set_listproc) {
 		}
 		# Set if not pretending
 		else {
+			print "Setting Affinity '".join(',', @opt_set_listcpu)."' to PID '$pid'\n";
 			proc_setaffinity($pid, \@opt_set_listcpu);
 		}
 	}
