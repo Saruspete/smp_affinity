@@ -262,16 +262,21 @@ if (@opt_set_listirq) {
 # Processes
 if (@opt_set_listproc) {
 	foreach my $pid (@opt_set_listproc) {
+
+		# Add to display list only if showing modified
+		if ($opt_show_onlymod && proc_getaffinity($pid) ne list2mask(\@opt_set_listcpu)) {
+			push(@opt_show_listproc, $pid);
+			push(@opt_show_listcpu, @opt_set_listcpu);
+		}
+
 		# Pretend to change
+		my $chgstr = "affinity '".join(',', @opt_set_listcpu)."' to PID '$pid'";
 		if ($opt_set_dry) {
-			# Add to display list only if showing modified
-			if ($opt_show_onlymod && proc_getaffinity($pid) ne list2mask(\@opt_set_listcpu)) {
-				push(@opt_show_listproc, $pid);
-			}
+			print "Would have set $chgstr\n";
 		}
 		# Set if not pretending
 		else {
-			print "Setting Affinity '".join(',', @opt_set_listcpu)."' to PID '$pid'\n";
+			print "Setting $chgstr\n";
 			proc_setaffinity($pid, \@opt_set_listcpu);
 		}
 	}
@@ -372,12 +377,12 @@ if (@opt_show_listirq) {
 # Display CPUs
 if (@opt_show_listproc) {
 
-	
 	# Order the process list - I bet you love Schwartzian transform :)
-	my @proclist =	map { $_->[2] }
-					sort { $a->[1] <=> $b->[1] || $a->[0] <=> $b->[0] }
-					map { [int($_->{pid}), (int($_->{ppid}||0) eq 2)? 0 : ($_->{ppid}||0), $_] }
-					@{proc_list()};
+	my @proclist =
+		map { $_->[2] }
+		sort { $a->[1] <=> $b->[1] || $a->[0] <=> $b->[0] }
+		map { [int($_->{pid}), (int($_->{ppid}||0) eq 2)? 0 : ($_->{ppid}||0), $_] }
+		@{proc_list()};
 
 	# Walk on each process
 	proclist:
@@ -610,7 +615,7 @@ sub string2list {
 		# Each range in listing (if any)
 		if (index($unit,'-') > -1) {
 			my ($from,$to) = split(/-/, $unit);
-			if (!$from || !$to || $from > $to) {
+			if ($from < 0 || !$to || $from > $to) {
 				print "Invalid range: $unit";
 				next;
 			}
