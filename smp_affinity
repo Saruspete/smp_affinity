@@ -262,6 +262,12 @@ if (@opt_set_listirq) {
 
 # Processes
 if (@opt_set_listproc) {
+
+	# Replace the keyword 'ALL' by PID list
+	if (inarray('ALL', @opt_set_listproc)) {
+		@opt_set_listproc = map { $_->{tid} } @{proc_list()};
+	}
+
 	foreach my $pid (@opt_set_listproc) {
 
 		# Add to display list only if showing modified
