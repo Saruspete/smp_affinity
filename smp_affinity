@@ -186,14 +186,15 @@ foreach my $user (@opt_show_listuser) {
 
 # Only apply show defaults if no set action is requested
 if (!@opt_set_listirq && !@opt_set_listproc) {
-	# Defaults to all CPUs to display
-	if (!@opt_show_listcpu) {
-		@opt_show_listcpu = @{cpu_list()};
-	}
 	# Defaults to all process to display
 	if (!@opt_show_listproc) {
 		@opt_show_listproc = 'ALL';
 	}
+}
+
+# Defaults to all CPUs to display
+if (!@opt_show_listcpu) {
+	@opt_show_listcpu = @{cpu_list()};
 }
 
 # Do standard expansion
