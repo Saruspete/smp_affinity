@@ -185,7 +185,8 @@ foreach my $user (@opt_show_listuser) {
 }
 
 # Only apply show defaults if no set action is requested
-if (!@opt_set_listirq && !@opt_set_listproc) {
+if (!@opt_set_listirq  && !@opt_set_listproc &&
+    !@opt_show_listirq && !@opt_show_listproc) {
 	# Defaults to all process to display
 	if (!@opt_show_listproc) {
 		@opt_show_listproc = 'ALL';
