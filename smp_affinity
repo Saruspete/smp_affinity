@@ -926,6 +926,11 @@ smp_affinity [-ksdh] [--nocolor] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs
   -P|--set-proc LIST   Set the affinity of processes in LIST to CPUs listed by -C
   -C|--set-proc LIST   Set LIST of CPUs on which to bind given processes or interrupts
 
+  --pctcpu=[-]<0-99>   Select only process that consumes more (or less if prefixed
+                       by -) than the specified percentage of CPU
+  --pctmem=[-]<0-99>   Select only process that consumes more (or less if prefixed
+                       by -) than the specified percentage of RAM
+
   LIST can be a combination of list and sequences of numbers, or keyword 'ALL':
     1,2,3,4              Explicit listing
     1-4                  Sequence, equivalent to the previous list
