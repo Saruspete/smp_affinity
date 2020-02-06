@@ -792,6 +792,21 @@ sub irq_setaffinity {
 	my ($irq, $cpulist) = @_;
 	my $file = "/proc/irq/$irq/smp_affinity";
 	my $cpumask = sprintf("%x", list2mask($cpulist));
+
+	# Special case: cpu >= 32 needs to be split with ','
+	my $len = length($cpumask);
+	if ($len > 8) {
+		# Treat as string: reverse the mask, and substr every 8 (or less remain)
+		$cpumask = reverse($cpumask);
+		my $cpumask2 = "";
+		for (my $remain = $len; $remain > 0; $remain -= 8) {
+			$cpumask2 .= substr($cpumask, $len-$remain, 8);
+			# Don't put the "," for the first pass. Would fail
+			if ($remain == $len) { $cpumask2 .= ","; }
+		}
+		$cpumask = reverse($cpumask2);
+	}
+
 	fileputcontents($file, $cpumask);
 	return (filegetcontents($file) eq $cpumask);
 }
