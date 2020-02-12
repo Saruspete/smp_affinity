@@ -24,6 +24,15 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 # #############################################################################
+# Notes:
+#
+# I tried to use Math::BigInt, but it's way too slow for the calculations needed
+# I don't want to use Sys::Hwloc::Bitmap, is it's non standard and only working
+# for existing process.
+# So I embed my own Bitmask class, that stores big masks as a serial of
+# independant 32 or 64bits numbers.
+# #############################################################################
+
 
 use strict;
 use warnings;
@@ -33,15 +42,6 @@ use Getopt::Long qw(:config no_ignore_case gnu_compat bundling auto_help);
 use Pod::Usage;
 use List::Util qw(max);
 
-# One day at work, they asked me to install & prepare a Ryzen Epyc 2*32 cores..
-# well, a bitmap with 2^64 is a bit large. Thats 128 if SMT activated...
-# In /proc/irq/default_smp_affinity, it's shown as  8 * 64bits, let it be:
-# 1157920892373161954235709850086879078532699846656405640394575840079131296399350
-# Size is done by include/linux/bitops.h :
-#   => BITS_TO_LONGS (nb_cpu)
-#   => DIV_ROUND_UP (nb_cpu, NBITS_PER_BYTE * sizeof(long))
-# TODO: Require Math::BigInt only if necessary
-use Math::BigInt;
 
 my $opt_show_help;
 my $opt_show_sep = ' ';
@@ -69,14 +69,26 @@ my @opt_set_listirq;
 my @opt_set_listproc;
 my $opt_set_distribute;
 
+my @cpu_schedrt = ['FF','RR'];
 my $bin_taskset = findbin('taskset');
 my $lib_sched = sched_dynload();
 my $has_proclist = sched_checkproc();
 my $chk_userlisthasregex = 0;
 my $has_color = (-t STDOUT) ? 1 : 0;
-my @cpu_isolatedlist = @{cpu_getisolated()};
-my $cpu_isolatedmask = list2mask(\@cpu_isolatedlist);
-my @cpu_schedrt = ['FF','RR'];
+
+# System common values
+my @cpu_allavail_list = @{cpu_getavail()};
+my @cpu_isolated_list = @{cpu_getisolated()};
+my @cpu_default_list  = @{cpu_getdefault()};
+
+my $cpu_allavail_mask = Bitmask->new(\@cpu_allavail_list);
+my $cpu_isolated_mask = Bitmask->new(\@cpu_isolated_list);
+my $cpu_default_mask  = Bitmask->new(\@cpu_default_list);
+
+#my $v = "fafbfa23ff";
+#my $test = Bitmask->new($v);
+#print " - $v toHexStr : " . Dumper($test->toHexStr());
+#print " - $v toList: " . Dumper($test->toList());
 
 # Parse options
 GetOptions(
@@ -195,7 +207,7 @@ if (!@opt_set_listirq  && !@opt_set_listproc &&
 
 # Defaults to all CPUs to display
 if (!@opt_show_listcpu) {
-	@opt_show_listcpu = @{cpu_list()};
+	@opt_show_listcpu = @cpu_allavail_list;
 }
 
 # Do standard expansion
@@ -203,12 +215,17 @@ if (!@opt_show_listcpu) {
 @opt_show_listcpu  = @{liststring2list(\@opt_show_listcpu)};
 
 # Replace special values by their real listing
-@opt_set_listcpu   = @{cpu_list()}        if (inarray('ALL', @opt_set_listcpu));
-@opt_show_listcpu  = @{cpu_list()}        if (inarray('ALL', @opt_show_listcpu));
-@opt_set_listcpu   = @cpu_isolatedlist    if (inarray('ISOLATED', @opt_set_listcpu));
-@opt_show_listcpu  = @cpu_isolatedlist    if (inarray('ISOLATED', @opt_show_listcpu));
-@opt_set_listcpu   = @{cpu_getdefault()}  if (inarray('NOTISOLATED', @opt_set_listcpu));
-@opt_show_listcpu  = @{cpu_getdefault()}  if (inarray('NOTISOLATED', @opt_show_listcpu));
+@opt_set_listcpu   = @cpu_allavail_list   if (inarray('ALL', @opt_set_listcpu));
+@opt_show_listcpu  = @cpu_allavail_list   if (inarray('ALL', @opt_show_listcpu));
+@opt_set_listcpu   = @cpu_isolated_list   if (inarray('ISOLATED', @opt_set_listcpu));
+@opt_show_listcpu  = @cpu_isolated_list   if (inarray('ISOLATED', @opt_show_listcpu));
+@opt_set_listcpu   = @cpu_default_list    if (inarray('NOTISOLATED', @opt_set_listcpu));
+@opt_show_listcpu  = @cpu_default_list    if (inarray('NOTISOLATED', @opt_show_listcpu));
+
+# Replace the keyword 'ALL' by PID list
+if (inarray('ALL', @opt_set_listproc)) {
+	@opt_set_listproc = map { $_->{tid} } @{proc_list()};
+}
 
 
 # Check if all values were correctly expanded
@@ -231,32 +248,37 @@ for my $chkopt (keys %checkvars) {
 }
 exit(1) if $chk_haserr;
 
-#@opt_set_listproc  = @{proc_getaffinitized()} if (inarray('NONSTANDARD', @opt_set_listproc));
-#@opt_show_listproc = @{proc_getaffinitized()} if (inarray('NONSTANDARD', @opt_show_listproc));
 
-
-# #########################################################
+# #############################################################################
+#
 # Set requested values
 #
+
+my $cpu_set_mask  = Bitmask->new(\@opt_set_listcpu);
 
 # Reset the display lists when displaying only modified elements
 if ($opt_show_onlymod) {
 	@opt_show_listproc = ();
 	@opt_show_listirq = ();
 }
+
 # IRQs
 if (@opt_set_listirq) {
+
 	foreach my $irq (@opt_set_listirq) {
+
+		my $irq_affinity_mask = irq_getaffinity($irq);
 		# Pretend to change...
 		if ($opt_set_dry) {
 			# Add to display list only if showing modified
-			if ($opt_show_onlymod && irq_getaffinity($irq) ne list2mask(\@opt_set_listcpu)) {
+			if ($opt_show_onlymod && ! $irq_affinity_mask->isEqual($cpu_set_mask)) {
 				push(@opt_show_listirq, $irq);
+				push(@opt_show_listcpu, @opt_set_listcpu);
 			}
 		}
 		# Set if not pretending
 		else {
-			irq_setaffinity($irq, \@opt_set_listcpu);
+			irq_setaffinity($irq, $cpu_set_mask);
 		}
 	}
 }
@@ -264,15 +286,10 @@ if (@opt_set_listirq) {
 # Processes
 if (@opt_set_listproc) {
 
-	# Replace the keyword 'ALL' by PID list
-	if (inarray('ALL', @opt_set_listproc)) {
-		@opt_set_listproc = map { $_->{tid} } @{proc_list()};
-	}
-
 	foreach my $pid (@opt_set_listproc) {
 
 		# Add to display list only if showing modified
-		if ($opt_show_onlymod && proc_getaffinity($pid) ne list2mask(\@opt_set_listcpu)) {
+		if ($opt_show_onlymod && $cpu_set_mask->isEqual(proc_getaffinity($pid)) ) {
 			push(@opt_show_listproc, $pid);
 			push(@opt_show_listcpu, @opt_set_listcpu);
 		}
@@ -284,34 +301,35 @@ if (@opt_set_listproc) {
 		}
 		# Set if not pretending
 		else {
-			print "Setting $chgstr\n";
-			proc_setaffinity($pid, \@opt_set_listcpu);
+			print "Setting pid $pid to $chgstr\n";
+			proc_setaffinity($pid, $cpu_set_mask);
 		}
 	}
 }
 
 
-# #########################################################
+
+# #############################################################################
+#
 # Display
 #
 
+my $cpu_show_mask = Bitmask->new(\@opt_show_listcpu);
+
 # Get some variables
 my $term_size = int(qx(/usr/bin/tput cols)) || 80;
+my $cpu_count = $#opt_show_listcpu+1;
 
-
-my @cpu_list = @opt_show_listcpu;
-my $cpu_count = $#cpu_list+1;
-
-my $cpu_mask_show = list2mask(\@opt_show_listcpu);
-my $cpu_mask_sys = list2mask(cpu_list());
-
-my $proc_default = list2mask(cpu_getdefault());
 
 # Calculations for column sizes
 my $col_sep = ' ';
 my $col_id  = 6;
 my $col_name = 8;
 my $col_cpu = $cpu_count * 3; # 3 cols / cpu
+# If we have some fields with 3 chars, add them
+if (max(@cpu_allavail_list) >= 100) {
+	$col_cpu += grep { $_ >= 100 } @opt_show_listcpu;
+}
 
 # dyn column = term width -  1st col  - 2nd col     - last col   - 3 cols * 1 char separator
 my $col_text = $term_size - ($col_id) - ($col_name) - ($col_cpu) - (3*1) -1;
@@ -338,7 +356,7 @@ my $body =	"%-${col_id}.${col_id}s"     . $col_sep .
 if (!$opt_show_quiet && (@opt_show_listproc || @opt_show_listirq) ) {
 	# Print the header
 	printf($head, "ID", "Owner", "Description");
-	foreach my $cpu (@cpu_list) {
+	foreach my $cpu (@opt_show_listcpu) {
 		print(" ") if ($cpu <= 9);
 		print("$cpu ");
 	}
@@ -350,7 +368,9 @@ if (!$opt_show_quiet && (@opt_show_listproc || @opt_show_listirq) ) {
 if (@opt_show_listirq) {
 
 	my $irq_default = irq_default();
-	foreach my $irq (@{irq_list()}) {
+	my %irq_list = %{irq_list()};
+	foreach my $irqnum (sort { $a <=> $b}  keys %irq_list) {
+		my $irq = $irq_list{$irqnum};
 
 		# Filter on non-stnadard affinities only
 		next if ($opt_show_onlydef && $irq->{affinity} eq $irq_default );
@@ -361,8 +381,8 @@ if (@opt_show_listirq) {
 
 
 			# Specific CPU affinity
-			if ($cpu_mask_show ne $proc_default) {
-				next if (! ( $irq->{affinity} & $cpu_mask_show) );
+			if (!$cpu_show_mask->isEqual($cpu_default_mask)) {
+				next if (! $irq->{affinity}->isIntersect($cpu_show_mask) );
 			}
 
 
@@ -376,7 +396,7 @@ if (@opt_show_listirq) {
 					$irq->{irq},
 					'',
 					$text,
-					cpu_dispmask(\@opt_show_listcpu, $irq->{affinity})
+					cpu_dispmask($cpu_show_mask, $irq->{affinity})
 				);
 		}
 	}
@@ -450,28 +470,27 @@ if (@opt_show_listproc) {
 			inarray($proc->{pid}, @opt_show_listproc) ) {
 
 			# Skip elements where we don't have affinity
-			my $affinity = proc_getaffinity($proc->{tid}) || next;
+			my $affinity_mask = proc_getaffinity($proc->{tid}) || next;
 
 			# Filter on non-stnadard affinities only
 			if ($opt_show_onlydef) {
 
 				# Default CPU listing
-				next if ($affinity eq $proc_default);
+				next if ($affinity_mask->isEqual($cpu_default_mask));
 
-				# Specific CPU affinity
-				if ($cpu_mask_show ne $proc_default) {
-					next if (! ( $affinity & $cpu_mask_show) );
-				}
+				# Specific CPU affinity, but no CPU we are interested in
+				next if ( ! $affinity_mask->isIntersect($cpu_show_mask) );
 			}
 
 			# Filter by cpu affinity count
-			if ($opt_show_count) {
-				my $rangeDir = substr($opt_show_count, 0, 1);
-				# Less / More / Exactly
-				next if ($rangeDir eq '-' && $affinity > substr($opt_show_count, 1));
-				next if ($rangeDir eq '+' && $affinity < substr($opt_show_count, 1));
-				next if (int($opt_show_count) eq $opt_show_count && $affinity != $opt_show_count);
-			}
+#			if ($opt_show_count) {
+#				my $rangeDir = substr($opt_show_count, 0, 1);
+#				# Less / More / Exactly
+#				next if ($rangeDir eq '-' && $affinity_mask > substr($opt_show_count, 1));
+#				next if ($rangeDir eq '+' && $affinity_mask < substr($opt_show_count, 1));
+			# TODO: What ?
+#				next if (int($opt_show_count) eq $opt_show_count && $affinity_mask != $opt_show_count);
+#			}
 
 			# Filter by CPU Usage
 			if ($opt_show_pctcpu) {
@@ -506,7 +525,7 @@ if (@opt_show_listproc) {
 					$proc->{tid},
 					$proc->{user},
 					$text,
-					cpu_dispmask(\@opt_show_listcpu, $affinity),
+					cpu_dispmask($cpu_show_mask, $affinity_mask),
 				);
 		}
 	}
@@ -596,15 +615,6 @@ sub fileputcontents {
 }
 
 
-# Transform an array of IDs to a mask
-sub list2mask {
-	my $mask = 0;
-	foreach my $cpu (@{$_[0]}) {
-		$mask |= 1 << $cpu;
-	}
-	return $mask;
-}
-
 sub liststring2list {
 	my @list;
 
@@ -675,12 +685,39 @@ sub sched_checkproc {
 # CPU Management
 #
 
+# Display the CPU Masks in a visible way
+sub cpu_dispmask {
+	my ($cpu_show_mask, $affinity_mask) = @_;
+	my $str = '';
+
+
+	my @cpu_list = @{$cpu_show_mask->toList()};
+
+	# Track cpuid to get isolated CPUs
+	my $cpuid = 0;
+	# Loop on all available CPUs to keep CPUID in sync
+	foreach my $cpuid (@cpu_list) {
+
+		$str .= " " if ($cpuid >= 100);
+
+		# If CPU is isolated
+		if ($cpu_isolated_mask->isBitSet($cpuid) ) {
+			$str .= (($affinity_mask->isBitSet($cpuid)) ? " $chr_cpuisolon " : " $chr_cpuisoloff ");
+		}
+		else {
+			$str .= (($affinity_mask->isBitSet($cpuid)) ? " $chr_cpustdon " : " $chr_cpustdoff ");
+		}
+	}
+	return $str;
+}
+
 # List all avaialble CPUs
-sub cpu_list {
+sub cpu_getavail {
 	my @cpus;
 	my $cpuinfo;
 	# TODO: replace this by Linux::CPUAffinity->num_processors
 	#       or fallback to /sys/devices/system/cpu/online
+#return [0..127];
 	open($cpuinfo, "<", "/proc/cpuinfo");
 	while (<$cpuinfo>) {
 		if (/^processor.+: ([0-9]+)$/) {
@@ -691,43 +728,12 @@ sub cpu_list {
 	return \@cpus;
 }
 
-# Display the CPU Masks in a visible way
-sub cpu_dispmask {
-	my ($cpulist, $affinity) = @_;
-	my $cpumask = list2mask($cpulist);
-	my $str = '';
-
-	# Track cpuid to get isolated CPUs
-	my $cpuid = 0;
-	my $cpumax = max(@$cpulist);
-	my $bittest = 1;
-	# Loop on all available CPUs to keep CPUID in sync
-	while ($cpuid <= $cpumax) {
-
-		# Filter on CPU to display
-		if ($cpumask & $bittest) {
-
-			# If CPU is isolated
-			if ($cpu_isolatedmask & $bittest) {
-				$str .= (($affinity & $bittest) ? " $chr_cpuisolon " : " $chr_cpuisoloff ");
-			}
-			else {
-				$str .= (($affinity & $bittest) ? " $chr_cpustdon " : " $chr_cpustdoff ");
-			}
-		}
-
-		$cpuid++;
-		$bittest = $bittest << 1;
-	}
-	return $str;
-}
-
 sub cpu_getisolated {
 	my @cpus;
 	my $cmd = filegetcontents('/proc/cmdline');
 	if (my ($res) = $cmd=~m/isolcpus=([0-9,-]+)/g) {
 		my @isolated = @{string2list($res)};
-		foreach my $cpu (@{cpu_list()}) {
+		foreach my $cpu (@{cpu_getavail()}) {
 			push(@cpus, $cpu) if (inarray($cpu, @isolated));
 		}
 	}
@@ -739,7 +745,7 @@ sub cpu_getdefault {
 	my @cpusdef;
 	my @cpusisol = @{cpu_getisolated()};
 
-	foreach my $cpu (@{cpu_list()}) {
+	foreach my $cpu (@{cpu_getavail()}) {
 		push(@cpusdef, $cpu) if (!inarray($cpu, @cpusisol));
 	}
 	return \@cpusdef;
@@ -750,17 +756,16 @@ sub cpu_getdefault {
 # IRQ Management
 #
 sub irq_available {
-	return ($> == 0);
+	#return ($> == 0);
+	return (-w "/proc/irq/default_smp_affinity");
 }
 
 sub irq_default {
-	my $str = normalize(filegetcontents("/proc/irq/default_smp_affinity"));
-	my $dec = Math::BigInt->new("0x$str");
-	return $dec;
+	return Bitmask->new(filegetcontents("/proc/irq/default_smp_affinity"));
 }
 
 sub irq_list {
-	my @irqs;
+	my %irqs;
 	my $irqinfo;
 
 	# Parse the /proc/interrupts listing
@@ -771,45 +776,34 @@ sub irq_list {
 		if (/$regex/) {
 			# Get the real IRQ affinity
 			my $irqnum = int(normalize($1));
-			my $affinity = Math::BigInt->new(
-				"0x".normalize(filegetcontents("/proc/irq/$irqnum/smp_affinity"))
-			);
 
 			# and add all the data to the listing
-			push(@irqs,{
+			$irqs{$irqnum} = {
 				irq      => $irqnum,
 				intr     => [split(" ", normalize($2))],
 				name     => normalize($3),
-				affinity => $affinity,
-
-			});
+				affinity => irq_getaffinity($irqnum),
+			};
 		}
 	}
 	close($irqinfo);
-	return \@irqs;
+	return \%irqs;
+}
+
+sub irq_getaffinity {
+	my ($irq) = @_;
+
+	return Bitmask->new(filegetcontents("/proc/irq/$irq/smp_affinity"));
 }
 
 sub irq_setaffinity {
-	my ($irq, $cpulist) = @_;
+	my ($irq, $cpumask) = @_;
 	my $file = "/proc/irq/$irq/smp_affinity";
-	my $cpumask = sprintf("%x", list2mask($cpulist));
 
-	# Special case: cpu >= 32 needs to be split with ','
-	my $len = length($cpumask);
-	if ($len > 8) {
-		# Treat as string: reverse the mask, and substr every 8 (or less remain)
-		$cpumask = reverse($cpumask);
-		my $cpumask2 = "";
-		for (my $remain = $len; $remain > 0; $remain -= 8) {
-			$cpumask2 .= substr($cpumask, $len-$remain, 8);
-			# Don't put the "," for the first pass. Would fail
-			if ($remain == $len) { $cpumask2 .= ","; }
-		}
-		$cpumask = reverse($cpumask2);
-	}
+	my $cpumaskstr = $cpumask->toHexStr();
 
-	fileputcontents($file, $cpumask);
-	return (filegetcontents($file) eq $cpumask);
+	fileputcontents($file, $cpumaskstr);
+	return ($cpumask->isEqual(irq_getaffinity($irq)));
 }
 
 
@@ -867,15 +861,18 @@ sub proc_getaffinity {
 
 	# Use Perl internal scheduling lib if available
 	if ($lib_sched && eval '@sched_cpus = @{Linux::CPUAffinity->get($pid)}' ) {
-		return list2mask(\@sched_cpus);
+		return Bitmask->new(\@sched_cpus);
 	}
 	# Check if the value is available in /proc/$pid/
 	# Yes, works also for non-leader threads, no need to /proc/$pid/task/$tid
 	elsif ($has_proclist && open my $fh, '<', "/proc/$pid/status") {
 		while (my $line = <$fh>) {
-			if ( my ($mask) = $line =~ m/^Cpus_allowed:\s+([0-9a-fA-F,]+)/) {
+			if ( my ($mask_str) = $line =~ m/^Cpus_allowed:\s+([0-9a-fA-F,]+)/) {
+				#$mask_str = "abcdffff,ffffffff,11111111,ffffffff";
 				close ($fh);
-				return Math::BigInt->new("0x".normalize($mask)) & $cpu_mask_sys;
+
+				my $r = $cpu_allavail_mask->getIntersectMask($mask_str);
+				return $r;
 			}
 		}
 		close($fh);
@@ -886,22 +883,210 @@ sub proc_getaffinity {
 
 		# If the process isnt visible or already gone
 		return if !@out;
-
-		# Return the mask if any
-		return Math::BigInt->new(pop(@out));
+		return pop(@out);
 	}
 }
 
 sub proc_setaffinity {
-	my ($pid, $cpus) = @_;
-	my $cpumask = sprintf("0x%x", list2mask($cpus));
-	my (@out) = split(/\s+/, qx($bin_taskset -p $cpumask $pid 2>/dev/null));
-	my $newaff = pop(@out);
+	my ($pid, $affinity_mask) = @_;
 
-	return ($newaff eq $cpumask) ;
+	my $newaff_mask;
+
+	if ($lib_sched) {
+		# set
+		Linux::CPUAffinity->set( $pid => [$affinity_mask->toList()] );
+		# check
+		$newaff_mask = Bitmask->new(\@{Linux::CPUAffinity->get($pid)});
+	}
+	else {
+		# Set
+		my $affinitystr = $affinity_mask->toString();
+		my (@out) = split(/\s+/, qx($bin_taskset --pid $affinitystr $pid 2>/dev/null));
+		# Check
+		my $newaff_str = pop(@out);
+		$newaff_mask = Bitmask->new(\@{string2list($newaff_str)});
+	}
+
+	# Validate
+	return ($affinity_mask->isEqual($newaff_mask)) ;
 }
 
 
+# =============================================================================
+#  Bitmask helper package
+# =============================================================================
+
+package Bitmask;
+
+no warnings 'portable';  # Support for 64-bit ints required
+
+use Data::Dumper;
+use Config;
+# ivsize = 4 (32) or 8 (64)
+use constant INTSIZE => 8 * $Config{ivsize};
+use constant MAXCPUS => 256;
+# 1 char = 4 bits
+use constant NCHARPERINT => INTSIZE / 4;
+use constant GRPMAX  => MAXCPUS / INTSIZE;
+
+# Features:
+# Creation from: Hex Str, List
+# Output to: Hex Str, List
+# Compute: Return 2 mask intersections
+# Set: bit from position (list) or number (or) or mask (and)
+
+sub _clone {
+	my $self = shift;
+	# Doing a simple, first layer copy, as we want to keep a "simple" object
+	my $clone = bless { %$self }, ref $self;
+	return $clone;
+}
+
+# -----------------------------------------------------------------------------
+# Create new instance
+# -----------------------------------------------------------------------------
+
+sub new {
+	my ($class, $input) = @_;
+
+	# 8 * 64 bits groups int, => up to 512 CPUs
+	my $self = {
+		numGrps     => [],
+		grpMax      => 0,
+	};
+
+	for (my $g=0; $g<GRPMAX; $g++) {
+		$self->{numGrps}[$g] = 0;
+	}
+
+	# Simple scalar: Expect hex string
+	if (ref($input) eq "") {
+		# Remove non-hex chars (mostly separators like ,)
+		$input =~ s/[^0-9a-fA-F]//g;
+		# Reverse the string for substr ease
+		my $str = reverse($input);
+		my $smax = length($str);
+
+		for (my $g=0, my $s=0; $g<GRPMAX && $s<=$smax; $g++, $s+=NCHARPERINT) {
+			# Reverse again the extract number
+			$self->{numGrps}[$g] = hex(reverse(substr($str, $s, NCHARPERINT)));
+			$self->{grpMax} = $g;
+		}
+	}
+	# List of values
+	elsif (ref($input) eq "ARRAY") {
+		foreach my $elem (@$input) {
+			my $grpId = int($elem / INTSIZE);
+			$self->{numGrps}[$grpId] |= 1 << ($elem - $grpId * INTSIZE);
+			$self->{grpMax} = $grpId if ($grpId > $self->{grpMax});
+		}
+	}
+	else {
+		die("Invalid input data for Bitmask: '$input' (type:".ref($input).")");
+	}
+
+	bless $self, $class;
+	return $self;
+}
+
+# -----------------------------------------------------------------------------
+#  Output
+# -----------------------------------------------------------------------------
+
+#
+# Output Hex String
+#
+sub toHexStr {
+	my ($self) = @_;
+	my $str = '';
+	for (my $i=$self->{grpMax}; $i>=0; $i--) {
+		$str .= sprintf("%x", $self->{numGrps}[$i]);
+		$str .= ',' if ($i>0);
+	}
+
+	return $str;
+}
+
+#
+# Output List
+#
+sub toList {
+	my ($self) = @_;
+	my @list;
+	for (my $g=0; $g<=$self->{grpMax}; $g++) {
+		my $n = $self->{numGrps}[$g];
+		for (my $i=0; $i<INTSIZE && $n > 0; $i++) {
+			push(@list, $i + ($g * INTSIZE)) if ( $n & 1);
+			$n >>= 1;
+		}
+	}
+	return \@list;
+}
+
+sub getIntersectMask {
+	my ($self, $obj) = @_;
+
+	my $ret = $self->_clone();
+
+
+	# Parsing against another bitmask
+	if (ref($obj) eq "Bitmask") {
+		for (my $g=0; $g<=$self->{grpMax}; $g++) {
+			$ret->{numGrps}[$g] = $self->{numGrps}[$g] & $obj->{numGrps}[$g];
+		}
+	}
+	# Parsing against a scalar
+	elsif (ref($obj) eq "") {
+		$obj =~ s/[^0-9a-fA-F]//g;
+		my $str = reverse($obj);
+		my $smax = length($str);
+
+		for (my $g=0, my $s=0; $g<GRPMAX && $s<=$smax; $g++, $s+=NCHARPERINT) {
+			$ret->{numGrps}[$g] = hex(reverse(substr($str, $s, NCHARPERINT)));
+			$ret->{grpMax} = $g;
+		}
+	}
+	return $ret;
+}
+
+# -----------------------------------------------------------------------------
+# Tests of bitmask
+# -----------------------------------------------------------------------------
+
+sub isBitSet {
+	my ($self, $pos) = @_;
+	# Fast check to avoid a div
+	if ($pos < INTSIZE) {
+		return 2**$pos & $self->{numGrps}[0];
+	}
+	# Bigger than a standard int, need a div
+	else {
+		# Quick check: our max group is lower than requested position
+		return 0 if ($pos > ($self->{grpMax} * INTSIZE) );
+		my $g = int($pos/INTSIZE);
+		return (2**($pos - ($g*INTSIZE))) & $self->{numGrps}[$g];
+	}
+}
+
+sub isEqual {
+	my ($self, $mask) = @_;
+	for (my $g=0; $g<GRPMAX; $g++) {
+		return 0 if ($mask->{numGrps}[$g] ne $self->{numGrps}[$g])
+	}
+	return 1;
+}
+
+sub isIntersect {
+	my ($self, $mask) = @_;
+	for (my $g=0; $g<GRPMAX; $g++) {
+		return 1 if ($mask->{numGrps}[$g] & $self->{numGrps}[$g]);
+	}
+	return 0;
+}
+
+# -----------------------------------------------------------------------------
+#
+# -----------------------------------------------------------------------------
 
 __END__
 =head1 NAME
