@@ -46,6 +46,8 @@ use List::Util qw(max);
 my $opt_show_help;
 my $opt_show_sep = ' ';
 
+my $opt_check_health;
+
 my $opt_show_onlymod;
 my $opt_show_onlydef;
 my $opt_show_pctcpu;
@@ -69,7 +71,7 @@ my @opt_set_listirq;
 my @opt_set_listproc;
 my $opt_set_distribute;
 
-my @cpu_schedrt = ['FF','RR'];
+my @cpu_schedrt = ('FF','RR');
 my $bin_taskset = findbin('taskset');
 my $lib_sched = sched_dynload();
 my $has_proclist = sched_checkproc();
@@ -122,6 +124,8 @@ GetOptions(
 	'I|set-irq=s'       => \@opt_set_listirq,
 	'P|set-proc=s'      => \@opt_set_listproc,
 	'D|distribute=i'    => \$opt_set_distribute,
+
+	'H|health'          => \$opt_check_health,
 ) or die ('Error while parsing options. Stopping');
 
 pod2usage(-verbose=>2) if $opt_show_help;
@@ -153,6 +157,7 @@ else {
 # Pre-checks and command line parsing
 #
 
+# IRQs
 if (@opt_show_listirq || @opt_set_listirq) {
 	if ( !irq_available() ) {
 		print "IRQs management is not available. Are you root ?\n";
@@ -162,10 +167,7 @@ if (@opt_show_listirq || @opt_set_listirq) {
 	@opt_set_listirq  = @{liststring2list(\@opt_set_listirq)};
 }
 
-
-#
-# Processes listing
-#
+# Processes
 if (@opt_show_listproc || @opt_set_listproc) {
 	if ( !proc_available() ) {
 		print "The Process management is not available\n";
@@ -177,18 +179,23 @@ if (@opt_show_listproc || @opt_set_listproc) {
 	@opt_set_listproc   = @{liststring2list(\@opt_set_listproc)};
 }
 
-if (@opt_set_listirq || @opt_set_listproc) {
-	if (!@opt_set_listcpu) {
-		print "You must specify a list of CPUs to set (-C <cpu-list>)\n";
-		exit(1);
-	}
-}
 
+#
+# Check conflicting values
+#
 if ($opt_show_onlymod && (@opt_show_listproc || @opt_show_listirq || @opt_show_listuser || $opt_show_filter || $opt_show_count ) ) {
 	print "You can't mix 'show-modified|m' with other filters (-d,-p,-i,-u,-c)\n";
 	exit(1);
 }
 
+if ($opt_check_health && (@opt_show_listproc || @opt_show_listirq || @opt_set_listproc || @opt_set_listirq ) ) {
+	print "You can't mix 'health|H' with other actions (show|set) (-p|-P|-i|-I)\n";
+	exit(1);
+}
+
+#
+# Apply filters
+#
 foreach my $user (@opt_show_listuser) {
 	# If user has non standard chars, assume a regex
 	if (! ($user =~ /^[^a-zA-Z0-9_]+$/)) {
@@ -198,11 +205,11 @@ foreach my $user (@opt_show_listuser) {
 
 # Only apply show defaults if no set action is requested
 if (!@opt_set_listirq  && !@opt_set_listproc &&
-    !@opt_show_listirq && !@opt_show_listproc) {
+    !@opt_show_listirq && !@opt_show_listproc &&
+    !$opt_check_health) {
+
 	# Defaults to all process to display
-	if (!@opt_show_listproc) {
-		@opt_show_listproc = 'ALL';
-	}
+	@opt_show_listproc = 'ALL';
 }
 
 # Defaults to all CPUs to display
@@ -210,7 +217,9 @@ if (!@opt_show_listcpu) {
 	@opt_show_listcpu = @cpu_allavail_list;
 }
 
-# Do standard expansion
+#
+# Process expansion
+#
 @opt_set_listcpu   = @{liststring2list(\@opt_set_listcpu)};
 @opt_show_listcpu  = @{liststring2list(\@opt_show_listcpu)};
 
@@ -225,6 +234,17 @@ if (!@opt_show_listcpu) {
 # Replace the keyword 'ALL' by PID list
 if (inarray('ALL', @opt_set_listproc)) {
 	@opt_set_listproc = map { $_->{tid} } @{proc_list()};
+}
+
+#
+# Check values
+#
+
+if (@opt_set_listirq || @opt_set_listproc) {
+	if (!@opt_set_listcpu) {
+		print "You must specify a list of CPUs to set (-C <cpu-list>)\n";
+		exit(1);
+	}
 }
 
 
@@ -247,6 +267,128 @@ for my $chkopt (keys %checkvars) {
 	}
 }
 exit(1) if $chk_haserr;
+
+# #############################################################################
+#
+# Health check
+#
+
+# The health will check for:
+# IRQs that are:
+#   - not on their local numa node
+# Process that are:
+#   - On a CPUs with 2 different RT classes
+#   - with affinity between isolated and standard cores
+#   - long running (>5min) and high CPU usage (>50%)
+#   - on an isolated cpu with multiple processes
+#   - realtime with high CPU usage (>30%) and not on an isolated core
+
+if ($opt_check_health) {
+
+	# Gather info and order it
+	my %topo  = %{cpu_gettopology()};
+	my %irqs  = %{irq_list()};
+	my @procs = @{proc_list()};
+	my @errors;
+
+	# Check for IRQs locality
+	for my $irqnum (keys %irqs) {
+		my %irq = %{$irqs{$irqnum}};
+
+		my @irqaffinity_cpus = @{$irq{affinity}->toList()};
+		my $irqaffinity_node = $irq{node};
+
+		# Check only if a NUMA node is defined
+		if ($irqaffinity_node ne -1) {
+
+			# Loop on all allowed CPUs
+			my $firstCPU;
+			for my $cpu (@irqaffinity_cpus) {
+				# The first CPU in the list is the most-likely to process INT
+				if (!$firstCPU) {
+					$firstCPU = $cpu;
+				}
+				if ($topo{cpu2node}[$cpu] != $irqaffinity_node) {
+					push(@errors, "IRQ '$irqnum' assigned to cpu '$cpu' not in node '$irqaffinity_node'\n");
+				}
+			}
+		}
+
+		# Check for interrupt on multiple CPUs
+		#
+	}
+
+	# Check for conflicting scheduling classes
+	my @cpusched;
+	my @cpuspinning;
+
+	for my $pid (keys @procs) {
+		my $task = $procs[$pid];
+
+		# Skip kernel threads if not requested
+		next if ($task->{ppid} eq "2" && !$opt_show_kthreads);
+
+		# Get affinity for these process
+		my $affinity = proc_getaffinity($pid);
+		next if !$affinity;
+
+		# Check if we are on an isolated core
+		if ($cpu_isolated_mask->isIntersect($affinity)) {
+
+			# If we have isolated AND standard cores
+			if ($cpu_default_mask->isIntersect($affinity)) {
+				push(@errors, "Process $pid affinity is on Isolated and non-isolated cores");
+			}
+
+			# Process is on isolated core, and consumes a lot of cpu, mark this CPU
+			if ($task->{pcpu} > 40) {
+				for my $cpu (@{$affinity->toList()}) {
+					# Check for already spinning process
+					if ($cpuspinning[$cpu] > 0) {
+						push(@errors, "Process $pid has affinity on cpu $cpu which is already consumed by process ".join(",", @{$cpuspinning[$cpu]}));
+					}
+					push(@{$cpuspinning[$cpu]}, $pid);
+				}
+			}
+
+		}
+		# Standard core
+		else {
+			# Check if process is running for more than 5min (300 sec) and consumed
+			# more than 50% cpu
+			if ($task->{pcpu} > 50 && $task->{etimes} > 300) {
+				push(@errors, "High CPU usage for long running process $task->{tid} on non-isolated core $task->{psr}");
+			}
+
+		}
+
+		# Check if multiple realtime classes
+		if (inarray($task->{class}, @cpu_schedrt)) {
+			for my $cpu (@{$affinity->toList()}) {
+				push(@{$cpusched[$cpu]->{$task->{class}}}, $pid);
+			}
+		}
+	}
+
+	for my $cpuid (keys @cpusched) {
+		my %cpudat = %{$cpusched[$cpuid] || {} };
+
+		if (keys(%cpudat) > 1) {
+			my $msg = "Multiple RT classes on CPU $cpuid: ";
+			for my $cls (sort(keys(%cpudat))) {
+				$msg .= "$cls(".join(",", @{$cpudat{$cls}}).") ";
+			}
+			push(@errors, $msg);
+		}
+	}
+
+	if (@errors) {
+		for my $errmsg (@errors) {
+			print "$errmsg\n";
+		}
+	}
+}
+
 
 
 # #############################################################################
@@ -730,6 +872,8 @@ sub cpu_getavail {
 
 sub cpu_getisolated {
 	my @cpus;
+
+	# TODO: Check for /sys/devices/system/cpu/isolated instead
 	my $cmd = filegetcontents('/proc/cmdline');
 	if (my ($res) = $cmd=~m/isolcpus=([0-9,-]+)/g) {
 		my @isolated = @{string2list($res)};
@@ -751,6 +895,46 @@ sub cpu_getdefault {
 	return \@cpusdef;
 }
 
+sub cpu_gettopology {
+	
+	my %topo = (
+		nodes    => [],
+		#sockets  => [],
+		#cores    => [],
+		cpus     => [],
+
+		#pkg2skt  => [],
+		#skt2pkg  => [],
+
+		#pkg2core => [],
+		#core2pkg => [],
+
+		#cpu2core => [],
+		#core2cpu => [],
+
+		# NUMA node
+		cpu2node => [],
+		node2cpu => [],
+	);
+
+	# List NUMA nodes
+	my $nodesstr = filegetcontents("/sys/devices/system/node/online");
+	@{$topo{nodes}} = @{string2list($nodesstr)};
+	for my $node (@{$topo{nodes}}) {
+		$node = normalize($node);
+		# Seems /cpumap is a bitmask
+		my $cpustr = filegetcontents("/sys/devices/system/node/node${node}/cpulist");
+		my @list = @{string2list($cpustr)};
+		$topo{node2cpu}[$node] = @list;
+		foreach my $cpu (@list) {
+			$topo{cpu2node}[$cpu] = $node;
+		}
+	}
+
+	# Check for NUMA distance / physical cores
+
+	return \%topo;
+}
 
 # #########################################################
 # IRQ Management
@@ -782,6 +966,7 @@ sub irq_list {
 				irq      => $irqnum,
 				intr     => [split(" ", normalize($2))],
 				name     => normalize($3),
+				node     => normalize(filegetcontents("/proc/irq/$irqnum/node")),
 				affinity => irq_getaffinity($irqnum),
 			};
 		}
@@ -828,7 +1013,7 @@ sub proc_list {
 	# args *must* be last and will not be normalized
 	# ilibc6 sets max username size to 32
 	# pthread sets thread name max to 16
-	my @fields = qw(tid pid ppid user:32 class rtprio nice psr pcpu pmem s comm:16 args);
+	my @fields = qw(tid pid ppid user:32 class rtprio nice psr etimes pcpu pmem s comm:16 args);
 	my $pscmd = "ps -L -o ".join("=,", @fields)."= $pssel";
 	my $proc;
 	open($proc, "-|", $pscmd);
@@ -924,6 +1109,7 @@ use Data::Dumper;
 use Config;
 # ivsize = 4 (32) or 8 (64)
 use constant INTSIZE => 8 * $Config{ivsize};
+# Can be fetched from /sys/devices/system/cpu/kernrel_max / offline (?)
 use constant MAXCPUS => 256;
 # 1 char = 4 bits
 use constant NCHARPERINT => INTSIZE / 4;
@@ -1048,6 +1234,7 @@ sub getIntersectMask {
 	}
 	return $ret;
 }
+
 
 # -----------------------------------------------------------------------------
 # Tests of bitmask
