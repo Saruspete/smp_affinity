@@ -297,10 +297,17 @@ if ($opt_check_health) {
 	my %irqs  = %{irq_list()};
 	my @procs = @{proc_list()};
 	my @errors;
+	my @missingirqaffinity;
 
 	# Check for IRQs locality
+	IRQCHECK:
 	for my $irqnum (keys %irqs) {
 		my %irq = %{$irqs{$irqnum}};
+
+		if ($irq{affinity} eq 0) {
+			push(@missingirqaffinity, $irqnum);
+			next IRQCHECK;
+		}
 
 		my @irqaffinity_cpus = @{$irq{affinity}->toList()};
 		my $irqaffinity_node = $irq{node};
@@ -324,6 +331,11 @@ if ($opt_check_health) {
 		# Check for interrupt on multiple CPUs
 		#
 	}
+
+	if (@missingirqaffinity) {
+		push(@errors, "Missing affinity for IRQs: ".join(",", @missingirqaffinity).". Are you root ?");
+	}
+
 
 	# Check for conflicting scheduling classes
 	my @cpusched;
@@ -523,8 +535,8 @@ if (@opt_show_listirq) {
 	foreach my $irqnum (sort { $a <=> $b}  keys %irq_list) {
 		my $irq = $irq_list{$irqnum};
 
-		# Filter on non-stnadard affinities only
-		next if ($opt_show_onlydef && $irq->{affinity} eq $irq_default );
+		# Filter on non-stnadard affinities only (or erroneous)
+		next if ($opt_show_onlydef && $irq->{affinity} && $irq->{affinity} eq $irq_default );
 
 
 		# Filter
@@ -533,9 +545,8 @@ if (@opt_show_listirq) {
 
 			# Specific CPU affinity
 			if (!$cpu_show_mask->isEqual($cpu_default_mask)) {
-				next if (! $irq->{affinity}->isIntersect($cpu_show_mask) );
+				next if ($irq->{affinity} && ! $irq->{affinity}->isIntersect($cpu_show_mask) );
 			}
-
 
 			my $text = $irq->{name};
 
@@ -543,12 +554,24 @@ if (@opt_show_listirq) {
 				$text .= "";
 			}
 
-			printf($body."\n",
-					$irq->{irq},
-					'',
-					$text,
-					cpu_dispmask($cpu_show_mask, $irq->{affinity})
-				);
+			# If we have the real affinity, show it as usual
+			if ($irq->{affinity}) {
+				printf($body."\n",
+						$irq->{irq},
+						'',
+						$text,
+						cpu_dispmask($cpu_show_mask, $irq->{affinity})
+					);
+			}
+			# else, cannot read the affinity. Show "?" instead
+			else {
+				printf($body."\n",
+						$irq->{irq},
+						'',
+						$text,
+						cpu_dispmask_unknown($cpu_show_mask)
+					);
+			}
 		}
 	}
 }
@@ -835,6 +858,24 @@ sub sched_checkproc {
 # ######################################################### 
 # CPU Management
 #
+
+sub cpu_dispmask_unknown {
+	my ($cpu_show_mask) = @_;
+	my $str = '';
+
+
+	my @cpu_list = @{$cpu_show_mask->toList()};
+
+	# Track cpuid to get isolated CPUs
+	my $cpuid = 0;
+	# Loop on all available CPUs to keep CPUID in sync
+	foreach my $cpuid (@cpu_list) {
+
+		$str .= " " if ($cpuid >= 100);
+		$str .= " ??";
+	}
+	return $str;
+}
 
 # Display the CPU Masks in a visible way
 sub cpu_dispmask {
