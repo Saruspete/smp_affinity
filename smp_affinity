@@ -159,12 +159,18 @@ else {
 #
 
 # IRQs
-if (@opt_show_listirq || @opt_set_listirq) {
-	if ( !irq_available() ) {
-		print "IRQs management is not available. Are you root ?\n";
+if (@opt_show_listirq) {
+	if ( !irq_available_read() ) {
+		print "IRQs check is not available. Are you root ?\n";
 		exit(1);
 	}
 	@opt_show_listirq = @{liststring2list(\@opt_show_listirq)};
+}
+if (@opt_set_listirq) {
+	if ( !irq_available_write() ) {
+		print "IRQs management is not available. Are you root ?\n";
+		exit(1);
+	}
 	@opt_set_listirq  = @{liststring2list(\@opt_set_listirq)};
 }
 
@@ -942,8 +948,10 @@ sub cpu_gettopology {
 # #########################################################
 # IRQ Management
 #
-sub irq_available {
-	#return ($> == 0);
+sub irq_available_read {
+	return (-r "/proc/irq/default_smp_affinity");
+}
+sub irq_available_write {
 	return (-w "/proc/irq/default_smp_affinity");
 }
 
