@@ -301,7 +301,7 @@ if ($opt_check_health) {
 
 	# Check for IRQs locality
 	IRQCHECK:
-	for my $irqnum (keys %irqs) {
+	foreach my $irqnum (sort { $a <=> $b}  keys %irqs) {
 		my %irq = %{$irqs{$irqnum}};
 
 		if ($irq{affinity} eq 0) {
