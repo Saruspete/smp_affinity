@@ -1119,6 +1119,7 @@ package Bitmask;
 
 no warnings 'portable';  # Support for 64-bit ints required
 
+use Storable qw(dclone);
 use Data::Dumper;
 use Config;
 # ivsize = 4 (32) or 8 (64)
@@ -1134,13 +1135,6 @@ use constant GRPMAX  => MAXCPUS / INTSIZE;
 # Output to: Hex Str, List
 # Compute: Return 2 mask intersections
 # Set: bit from position (list) or number (or) or mask (and)
-
-sub _clone {
-	my $self = shift;
-	# Doing a simple, first layer copy, as we want to keep a "simple" object
-	my $clone = bless { %$self }, ref $self;
-	return $clone;
-}
 
 # -----------------------------------------------------------------------------
 # Create new instance
@@ -1226,13 +1220,14 @@ sub toList {
 sub getIntersectMask {
 	my ($self, $obj) = @_;
 
-	my $ret = $self->_clone();
+	# Deep-clone
+	my $ret = dclone($self);
 
 
 	# Parsing against another bitmask
 	if (ref($obj) eq "Bitmask") {
 		for (my $g=0; $g<=$self->{grpMax}; $g++) {
-			$ret->{numGrps}[$g] = $self->{numGrps}[$g] & $obj->{numGrps}[$g];
+			$ret->{numGrps}[$g] &= $obj->{numGrps}[$g];
 		}
 	}
 	# Parsing against a scalar
@@ -1241,10 +1236,11 @@ sub getIntersectMask {
 		my $str = reverse($obj);
 		my $smax = length($str);
 
-		for (my $g=0, my $s=0; $g<GRPMAX && $s<=$smax; $g++, $s+=NCHARPERINT) {
-			$ret->{numGrps}[$g] = hex(reverse(substr($str, $s, NCHARPERINT)));
-			$ret->{grpMax} = $g;
+		my $g = 0;
+		for ($g=0, my $s=0; $g<$ret->{grpMax} && $s<=$smax; $g++, $s+=NCHARPERINT) {
+			$ret->{numGrps}[$g] &= hex(reverse(substr($str, $s, NCHARPERINT)));
 		}
+		$ret->{grpMax} = $g;
 	}
 	return $ret;
 }
