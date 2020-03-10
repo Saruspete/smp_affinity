@@ -75,6 +75,7 @@ my @cpu_schedrt = ('FF','RR');
 my $bin_taskset = findbin('taskset');
 my $lib_sched = sched_dynload();
 my $has_proclist = sched_checkproc();
+my $has_ps_etimes = 0;
 my $chk_userlisthasregex = 0;
 my $has_color = (-t STDOUT) ? 1 : 0;
 
@@ -356,7 +357,7 @@ if ($opt_check_health) {
 		else {
 			# Check if process is running for more than 5min (300 sec) and consumed
 			# more than 50% cpu
-			if ($task->{pcpu} > 50 && $task->{etimes} > 300) {
+			if ($has_ps_etimes && $task->{pcpu} > 50 && $task->{etimes} > 300) {
 				push(@errors, "High CPU usage for long running process $task->{tid} on non-isolated core $task->{psr}");
 			}
 
@@ -1009,11 +1010,20 @@ sub proc_list {
 	# By default, select all of them
 	my $pssel = (@pids) ? "-p ".join(' ', @pids) : 'ax';
 
+	my $psversion = `ps -V|awk '{split(\$NF,a,"."); print a[1]"."a[2];}'`;
+	if (0.0 + $psversion >= 3.3) {
+		$has_ps_etimes = 1;
+	}
+
 	my @procs;
-	# args *must* be last and will not be normalized
 	# ilibc6 sets max username size to 32
 	# pthread sets thread name max to 16
-	my @fields = qw(tid pid ppid user:32 class rtprio nice psr etimes pcpu pmem s comm:16 args);
+	my @fields = qw(tid pid ppid user:32 class rtprio nice psr etimes pcpu pmem s comm:16);
+	push(@fields, ("etimes")) if ($has_ps_etimes);
+
+	# args *must* be last and will not be normalized
+	push(@fields, ("args"));
+
 	my $pscmd = "ps -L -o ".join("=,", @fields)."= $pssel";
 	my $proc;
 	open($proc, "-|", $pscmd);
