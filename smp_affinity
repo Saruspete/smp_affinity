@@ -323,11 +323,9 @@ if ($opt_check_health) {
 	my @cpusched;
 	my @cpuspinning;
 
-	# https://stackoverflow.com/questions/20824920/perl-array-references-and-avoiding-type-of-arg-1-to-keys-must-be-hash-error
-	#for my $pid (keys @procs) {
-	for my $pid (0 .. $#procs) {
+	for my $task (@procs) {
 
-		my $task = $procs[$pid];
+		my $pid = $task->{"tid"};
 
 		# Skip kernel threads if not requested
 		next if ($task->{ppid} eq "2" && !$opt_show_kthreads);
@@ -374,7 +372,7 @@ if ($opt_check_health) {
 		}
 	}
 
-	#for my $cpuid (keys @cpusched) {
+	# https://stackoverflow.com/questions/20824920/perl-array-references-and-avoiding-type-of-arg-1-to-keys-must-be-hash-error
 	for my $cpuid (0 .. $#cpusched) {
 		my %cpudat = %{$cpusched[$cpuid] || {} };
 
