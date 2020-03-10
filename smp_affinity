@@ -322,8 +322,8 @@ if ($opt_check_health) {
 				if (!$firstCPU) {
 					$firstCPU = $cpu;
 				}
-				if ($topo{cpu2node}[$cpu] != $irqaffinity_node) {
-					push(@errors, "IRQ '$irqnum' assigned to cpu '$cpu' not in node '$irqaffinity_node'\n");
+				if ($topo{cpu2node}[$cpu] ne $irqaffinity_node) {
+					push(@errors, "IRQ '$irqnum' assigned to cpu '$cpu' not in node '$irqaffinity_node'");
 				}
 			}
 		}
