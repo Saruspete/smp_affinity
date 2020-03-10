@@ -1018,11 +1018,11 @@ sub proc_list {
 	my @procs;
 	# ilibc6 sets max username size to 32
 	# pthread sets thread name max to 16
-	my @fields = qw(tid pid ppid user:32 class rtprio nice psr etimes pcpu pmem s comm:16);
-	push(@fields, ("etimes")) if ($has_ps_etimes);
+	my @fields = qw(tid pid ppid user:32 class rtprio nice psr pcpu pmem s comm:16);
+	push(@fields, "etimes") if ($has_ps_etimes);
 
 	# args *must* be last and will not be normalized
-	push(@fields, ("args"));
+	push(@fields, "args");
 
 	my $pscmd = "ps -L -o ".join("=,", @fields)."= $pssel";
 	my $proc;
