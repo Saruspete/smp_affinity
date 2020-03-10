@@ -357,7 +357,7 @@ if ($opt_check_health) {
 
 			# If we have isolated AND standard cores
 			if ($cpu_default_mask->isIntersect($affinity)) {
-				push(@errors, "Process $pid affinity is on Isolated and non-isolated cores");
+				push(@errors, "Process $pid ($task->{comm}) affinity is on both Isolated and non-isolated cores");
 			}
 
 			# Process is on isolated core, and consumes a lot of cpu, mark this CPU
