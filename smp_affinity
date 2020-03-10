@@ -745,7 +745,7 @@ sub filegetcontents {
 	my $file = shift || return '';
 	my $fh;
 	my $content = '';
-	open($fh, "<", $file);
+	open($fh, "<", $file) || return;
 	{
 		local $/ = undef;
 		$content = <$fh>;
@@ -978,7 +978,7 @@ sub irq_list {
 				intr     => [split(" ", normalize($2))],
 				name     => normalize($3),
 				node     => normalize(filegetcontents("/proc/irq/$irqnum/node")),
-				affinity => irq_getaffinity($irqnum),
+				affinity => irq_getaffinity($irqnum) || 0,
 			};
 		}
 	}
@@ -989,7 +989,8 @@ sub irq_list {
 sub irq_getaffinity {
 	my ($irq) = @_;
 
-	return Bitmask->new(filegetcontents("/proc/irq/$irq/smp_affinity"));
+	my $txt = filegetcontents("/proc/irq/$irq/smp_affinity") || return;
+	return Bitmask->new($txt);
 }
 
 sub irq_setaffinity {
