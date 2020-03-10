@@ -1235,10 +1235,14 @@ sub getIntersectMask {
 		my $smax = length($str);
 
 		my $g = 0;
-		for ($g=0, my $s=0; $g<$ret->{grpMax} && $s<=$smax; $g++, $s+=NCHARPERINT) {
+		for ($g=0, my $s=0; $g<=$ret->{grpMax} && $s<=$smax; $g++, $s+=NCHARPERINT) {
 			$ret->{numGrps}[$g] &= hex(reverse(substr($str, $s, NCHARPERINT)));
 		}
 		$ret->{grpMax} = $g;
+	}
+	else {
+		print "Fatal: Unhandled Bitmask Intersection resquested: '".ref($obj)."'\n";
+		exit(1);
 	}
 	return $ret;
 }
