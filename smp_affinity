@@ -1149,7 +1149,7 @@ sub proc_setaffinity {
 	else {
 		# Set
 		my $affinitystr = $affinity_mask->toString();
-		my (@out) = split(/\s+/, qx($bin_taskset --pid $affinitystr $pid 2>/dev/null));
+		my (@out) = split(/\s+/, qx($bin_taskset --cpu-list --pid $affinitystr $pid 2>/dev/null));
 		# Check
 		my $newaff_str = pop(@out);
 		$newaff_mask = Bitmask->new(\@{string2list($newaff_str)});
