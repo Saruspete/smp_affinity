@@ -57,6 +57,7 @@ my $opt_show_stats;
 my $opt_show_kthreads;
 my $opt_show_quiet;
 my $opt_show_count;
+my $opt_show_compact;
 # TODO: Add filtering
 my $opt_show_filter;
 
@@ -103,6 +104,7 @@ GetOptions(
 	'q|quiet'           => \$opt_show_quiet,
 	'c|show-cpus=s'     => \@opt_show_listcpu,
 	'color!'            => \$has_color,
+	'compact!'          => \$opt_show_compact,
 
 	# Display filters
 	'd|defined-only'    => \$opt_show_onlydef,
@@ -490,9 +492,18 @@ my $col_sep = ' ';
 my $col_id  = 6;
 my $col_name = 8;
 my $col_cpu = $cpu_count * 3; # 3 cols / cpu
+
 # If we have some fields with 3 chars, add them
 if (max(@cpu_allavail_list) >= 100) {
 	$col_cpu += grep { $_ >= 100 } @opt_show_listcpu;
+}
+
+# In compact mode, override CPU field
+if ($opt_show_compact) {
+	# No space between columns
+	$col_cpu = $cpu_count;
+	# Only space between blocks of 10 CPUs
+	$col_cpu += int($cpu_count / 10);
 }
 
 # dyn column = term width -  1st col  - 2nd col     - last col   - 3 cols * 1 char separator
@@ -516,13 +527,36 @@ my $body =	"%-${col_id}.${col_id}s"     . $col_sep .
 			" %s";
 
 
+#
 # Show the header if not quiet
+#
 if (!$opt_show_quiet && (@opt_show_listproc || @opt_show_listirq) ) {
 	# Print the header
 	printf($head, "ID", "Owner", "Description");
-	foreach my $cpu (@opt_show_listcpu) {
-		print(" ") if ($cpu <= 9);
-		print("$cpu ");
+
+	# Compact display: no space between elements
+	if ($opt_show_compact) {
+		my $lastcpu = -2;
+		my $cpuseq = 0;
+		foreach my $cpu (@opt_show_listcpu) {
+			# Show gaps in sequence, or every 10 CPU
+			if ($lastcpu+1 != $cpu || $cpuseq % 10 == 0) {
+				print("\b") if ($cpu > 100);
+				print("$cpu");
+				print(" ") if ($cpu == 0);
+			}
+			else {
+				print(" ");
+			}
+			$lastcpu = $cpu;
+			$cpuseq++;
+		}
+	}
+	else {
+		foreach my $cpu (@opt_show_listcpu) {
+			print(" ") if ($cpu <= 9);
+			print("$cpu ");
+		}
 	}
 	print "\n";
 }
@@ -888,18 +922,30 @@ sub cpu_dispmask {
 
 	# Track cpuid to get isolated CPUs
 	my $cpuid = 0;
+	my $cpucnt = 0;
 	# Loop on all available CPUs to keep CPUID in sync
 	foreach my $cpuid (@cpu_list) {
 
-		$str .= " " if ($cpuid >= 100);
-
 		# If CPU is isolated
+		my $char = '';
 		if ($cpu_isolated_mask->isBitSet($cpuid) ) {
-			$str .= (($affinity_mask->isBitSet($cpuid)) ? " $chr_cpuisolon " : " $chr_cpuisoloff ");
+			$char = (($affinity_mask->isBitSet($cpuid)) ? $chr_cpuisolon : $chr_cpuisoloff);
 		}
 		else {
-			$str .= (($affinity_mask->isBitSet($cpuid)) ? " $chr_cpustdon " : " $chr_cpustdoff ");
+			$char = (($affinity_mask->isBitSet($cpuid)) ? $chr_cpustdon : $chr_cpustdoff);
 		}
+		# Compact display
+		if ($opt_show_compact) {
+			$str .= $char;
+			# Add space every 10 cols
+			$str .= "|" if ($cpucnt && $cpucnt % 10 == 0);
+		}
+		# Standard display
+		else {
+			$str .= " $char ";
+			$str .= " " if ($cpuid >= 100);
+		}
+		$cpucnt++;
 	}
 	return $str;
 }
