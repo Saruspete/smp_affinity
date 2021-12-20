@@ -486,10 +486,12 @@ my $cpu_show_mask = Bitmask->new(\@opt_show_listcpu);
 my $term_size = int(qx(/usr/bin/tput cols)) || 80;
 my $cpu_count = $#opt_show_listcpu+1;
 
+my $pid_max = filegetcontents("/proc/sys/kernel/pid_max");
 
 # Calculations for column sizes
 my $col_sep = ' ';
-my $col_id  = 6;
+my $col_id  = length($pid_max) || 6;
+
 my $col_name = 8;
 my $col_cpu = $cpu_count * 3; # 3 cols / cpu
 
