@@ -1403,6 +1403,7 @@ smp_affinity [-ksdh] [--nocolor] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs
   -s|--statistics      Show statistics (%cpu,%mem,sched,state) for process or
                        show interrupt count for IRQs
      --nocolor         Don't use colored output (auto-selected if not a tty)
+     --compact         Use compact display mode (for big number of CPUs)
   -k|--kernel-threads  Show kernel threads
   -d|--defined-only    Only show tasks/irqs with non-standard affinity
 
