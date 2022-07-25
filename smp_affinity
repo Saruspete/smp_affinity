@@ -42,8 +42,11 @@ use Getopt::Long qw(:config no_ignore_case gnu_compat bundling auto_help);
 use Pod::Usage;
 use List::Util qw(max sum);
 
+my $app_name = "smp_affinity";
+my $app_version = "1.9.0";
 
 my $opt_show_help;
+my $opt_show_version;
 my $opt_show_sep = ' ';
 
 my $opt_do_check_all;
@@ -102,6 +105,7 @@ my $cpu_default_mask  = Bitmask->new(\@cpu_default_list);
 GetOptions(
 	# Help
 	'h|help'            => \$opt_show_help,
+	'V|version'         => \$opt_show_version,
 
 	# Display format modifiers
 	's|statistics'      => \$opt_show_stats,
@@ -142,6 +146,10 @@ GetOptions(
 ) or die ('Error while parsing options. Stopping');
 
 pod2usage(-verbose=>2) if $opt_show_help;
+if ($opt_show_version) {
+	print "$app_name $app_version\n";
+	exit 0;
+}
 
 
 my $chr_cpustdon   = "X";
