@@ -40,7 +40,7 @@ use warnings;
 use Data::Dumper;
 use Getopt::Long qw(:config no_ignore_case gnu_compat bundling auto_help);
 use Pod::Usage;
-use List::Util qw(max);
+use List::Util qw(max sum);
 
 
 my $opt_show_help;
@@ -318,6 +318,15 @@ if ($opt_do_check_irqs) {
 	IRQCHECK:
 	foreach my $irqnum (sort { $a <=> $b}  keys %irqs) {
 		my %irq = %{$irqs{$irqnum}};
+
+		# Only process MSI
+		if (index($irq{name}, "MSI") == -1) {
+			next IRQCHECK;
+		}
+		# Skip interrupts without any interruption
+		if (! $irq{intrsum}) {
+			next IRQCHECK;
+		}
 
 		if ($irq{affinity} eq 0) {
 			push(@missingirqaffinity, $irqnum);
@@ -1085,11 +1094,15 @@ sub irq_list {
 			# and add all the data to the listing
 			$irqs{$irqnum} = {
 				irq      => $irqnum,
-				intr     => [split(" ", normalize($2))],
+				intr     => [ split(" ", normalize($2)) ],
+				intrsum  => 0,
 				name     => normalize($3),
 				node     => normalize(filegetcontents("/proc/irq/$irqnum/node")),
 				affinity => irq_getaffinity($irqnum) || 0,
 			};
+			$irqs{$irqnum}{intrsum} = sum(@{$irqs{$irqnum}{intr}});
+
+			#print $irqs{$irqnum}{name} . " = " . join(",", @{$irqs{$irqnum}{intr}}) . " = " . $irqs{$irqnum}{intrtot} . "\n";
 		}
 	}
 	close($irqinfo);
