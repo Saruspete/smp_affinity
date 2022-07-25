@@ -46,7 +46,11 @@ use List::Util qw(max);
 my $opt_show_help;
 my $opt_show_sep = ' ';
 
-my $opt_check_health;
+my $opt_do_check_all;
+my $opt_do_check_irqs;
+my $opt_do_check_procs;
+my $opt_check_cpupct = 50;
+my $opt_check_runtime = 300;
 
 my $opt_show_onlymod;
 my $opt_show_onlydef;
@@ -126,9 +130,15 @@ GetOptions(
 	'C|set-cpu=s'       => \@opt_set_listcpu,
 	'I|set-irq=s'       => \@opt_set_listirq,
 	'P|set-proc=s'      => \@opt_set_listproc,
-	'D|distribute=i'    => \$opt_set_distribute,
+#	'D|distribute=i'    => \$opt_set_distribute,
 
-	'H|health'          => \$opt_check_health,
+	'check-all!'        => \$opt_do_check_all,
+	'check-irq!'        => \$opt_do_check_irqs,
+	'check-procs!'      => \$opt_do_check_procs,
+	'check-cpupct=i'    => \$opt_check_cpupct,
+	'check-runtime=i'   => \$opt_check_runtime,
+	# Legacy
+	'H|health'       => \$opt_do_check_all,
 ) or die ('Error while parsing options. Stopping');
 
 pod2usage(-verbose=>2) if $opt_show_help;
@@ -148,6 +158,10 @@ if ($has_color) {
 else {
 	$chr_cpuisoloff = "-";
 	$chr_cpustdoff  = ".";
+}
+
+if ($opt_do_check_all) {
+	$opt_do_check_irqs = $opt_do_check_procs = $opt_do_check_all;
 }
 
 # #############################################################################
@@ -197,8 +211,8 @@ if ($opt_show_onlymod && (@opt_show_listproc || @opt_show_listirq || @opt_show_l
 	exit(1);
 }
 
-if ($opt_check_health && (@opt_show_listproc || @opt_show_listirq || @opt_set_listproc || @opt_set_listirq ) ) {
-	print "You can't mix 'health|H' with other actions (show|set) (-p|-P|-i|-I)\n";
+if ( ($opt_do_check_procs || $opt_do_check_irqs) && (@opt_show_listproc || @opt_show_listirq || @opt_set_listproc || @opt_set_listirq ) ) {
+	print "You can't mix 'check' with other actions (show|set) (-p|-P|-i|-I)\n";
 	exit(1);
 }
 
@@ -213,9 +227,9 @@ foreach my $user (@opt_show_listuser) {
 }
 
 # Only apply show defaults if no set action is requested
-if (!@opt_set_listirq  && !@opt_set_listproc &&
-    !@opt_show_listirq && !@opt_show_listproc &&
-    !$opt_check_health) {
+if (!@opt_set_listirq   && !@opt_set_listproc &&
+    !@opt_show_listirq  && !@opt_show_listproc &&
+    !$opt_do_check_irqs && !$opt_do_check_procs) {
 
 	# Defaults to all process to display
 	@opt_show_listproc = 'ALL';
@@ -292,13 +306,12 @@ exit(1) if $chk_haserr;
 #   - on an isolated cpu with multiple processes
 #   - realtime with high CPU usage (>30%) and not on an isolated core
 
-if ($opt_check_health) {
+my @errors;
+if ($opt_do_check_irqs) {
 
 	# Gather info and order it
 	my %topo  = %{cpu_gettopology()};
 	my %irqs  = %{irq_list()};
-	my @procs = @{proc_list()};
-	my @errors;
 	my @missingirqaffinity;
 
 	# Check for IRQs locality
@@ -337,11 +350,14 @@ if ($opt_check_health) {
 	if (@missingirqaffinity) {
 		push(@errors, "Missing affinity for IRQs: ".join(",", @missingirqaffinity).". Are you root ?");
 	}
+}
 
+if ($opt_do_check_procs) {
 
 	# Check for conflicting scheduling classes
 	my @cpusched;
 	my @cpuspinning;
+	my @procs = @{proc_list()};
 
 	for my $task (@procs) {
 
@@ -363,10 +379,10 @@ if ($opt_check_health) {
 			}
 
 			# Process is on isolated core, and consumes a lot of cpu, mark this CPU
-			if ($task->{pcpu} > 40) {
+			if ($task->{pcpu} > $opt_check_cpupct) {
 				for my $cpu (@{$affinity->toList()}) {
 					# Check for already spinning process
-					if ($cpuspinning[$cpu] > 0) {
+					if ( $cpuspinning[$cpu] ) {
 						push(@errors, "Process $pid has affinity on cpu $cpu which is already consumed by process ".join(",", @{$cpuspinning[$cpu]}));
 					}
 					push(@{$cpuspinning[$cpu]}, $pid);
@@ -378,13 +394,13 @@ if ($opt_check_health) {
 		else {
 			# Check if process is running for more than 5min (300 sec) and consumed
 			# more than 50% cpu
-			if ($has_ps_etimes && $task->{pcpu} > 50 && $task->{etimes} > 300) {
-				push(@errors, "High CPU usage for long running process $task->{tid} on non-isolated core $task->{psr}");
+			if ($has_ps_etimes && $task->{pcpu} > $opt_check_cpupct && $task->{etimes} > $opt_check_runtime) {
+				push(@errors, "High CPU usage (>${opt_check_cpupct}%) for long running (>${opt_check_runtime}s) process $task->{tid} on non-isolated core $task->{psr}");
 			}
 
 		}
 
-		# Check if multiple realtime classes
+		# Check if multiple realtime policies
 		if (inarray($task->{class}, @cpu_schedrt)) {
 			for my $cpu (@{$affinity->toList()}) {
 				push(@{$cpusched[$cpu]->{$task->{class}}}, $pid);
@@ -404,13 +420,17 @@ if ($opt_check_health) {
 			push(@errors, $msg);
 		}
 	}
+}
 
-	if (@errors) {
-		for my $errmsg (@errors) {
-			print "$errmsg\n";
-		}
-		exit(2);
+if (@errors) {
+	for my $errmsg (@errors) {
+		print "$errmsg\n";
 	}
+	exit(2);
+}
+
+if ($opt_do_check_procs || $opt_do_check_irqs) {
+	exit(0);
 }
 
 
