@@ -63,7 +63,6 @@ my $opt_show_realtime;
 my $opt_show_stats;
 my $opt_show_kthreads;
 my $opt_show_quiet;
-my $opt_show_count;
 my $opt_show_compact;
 # TODO: Add filtering
 my $opt_show_filter;
@@ -77,7 +76,6 @@ my $opt_set_dry;
 my @opt_set_listcpu;
 my @opt_set_listirq;
 my @opt_set_listproc;
-my $opt_set_distribute;
 
 my @cpu_schedrt = ('FF','RR');
 my $bin_taskset = findbin('taskset');
@@ -110,7 +108,6 @@ GetOptions(
 	# Display format modifiers
 	's|statistics'      => \$opt_show_stats,
 	'q|quiet'           => \$opt_show_quiet,
-	'c|show-cpus=s'     => \@opt_show_listcpu,
 	'color!'            => \$has_color,
 	'compact!'          => \$opt_show_compact,
 
@@ -120,8 +117,7 @@ GetOptions(
 	'pctcpu=s'          => \$opt_show_pctcpu,
 	'pctmem=s'          => \$opt_show_pctmem,
 	'rt|realtime'       => \$opt_show_realtime,
-	#'f|filter=s'        => \$opt_show_filter,
-	'r|show-count=s'    => \$opt_show_count,
+	'c|show-cpus=s'     => \@opt_show_listcpu,
 	'i|show-irq=s'      => \@opt_show_listirq,
 	'p|show-proc=s'     => \@opt_show_listproc,
 	'u|show-user=s'     => \@opt_show_listuser,
@@ -134,7 +130,6 @@ GetOptions(
 	'C|set-cpu=s'       => \@opt_set_listcpu,
 	'I|set-irq=s'       => \@opt_set_listirq,
 	'P|set-proc=s'      => \@opt_set_listproc,
-#	'D|distribute=i'    => \$opt_set_distribute,
 
 	'check-all!'        => \$opt_do_check_all,
 	'check-irq!'        => \$opt_do_check_irqs,
@@ -214,7 +209,7 @@ if (@opt_show_listproc || @opt_set_listproc) {
 #
 # Check conflicting values
 #
-if ($opt_show_onlymod && (@opt_show_listproc || @opt_show_listirq || @opt_show_listuser || $opt_show_filter || $opt_show_count ) ) {
+if ($opt_show_onlymod && (@opt_show_listproc || @opt_show_listirq || @opt_show_listuser || $opt_show_filter ) ) {
 	print "You can't mix 'show-modified|m' with other filters (-d,-p,-i,-u,-c)\n";
 	exit(1);
 }
@@ -729,16 +724,6 @@ if (@opt_show_listproc) {
 				# Specific CPU affinity, but no CPU we are interested in
 				next if ( ! $affinity_mask->isIntersect($cpu_show_mask) );
 			}
-
-			# Filter by cpu affinity count
-#			if ($opt_show_count) {
-#				my $rangeDir = substr($opt_show_count, 0, 1);
-#				# Less / More / Exactly
-#				next if ($rangeDir eq '-' && $affinity_mask > substr($opt_show_count, 1));
-#				next if ($rangeDir eq '+' && $affinity_mask < substr($opt_show_count, 1));
-			# TODO: What ?
-#				next if (int($opt_show_count) eq $opt_show_count && $affinity_mask != $opt_show_count);
-#			}
 
 			# Filter by CPU Usage
 			if ($opt_show_pctcpu) {
@@ -1438,24 +1423,44 @@ smp_affinity - Get and Set the affinity of IRQs and Processes
 smp_affinity [-ksdh] [--nocolor] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs]
 
  Options:
-  -i|--show-irq LIST   Show interrupts with IRQ number in LIST
-  -p|--show-proc LIST  Show process with PID in LIST
-  -c|--show-cpus LIST  Filter on the CPUs list to display
-  -s|--statistics      Show statistics (%cpu,%mem,sched,state) for process or
-                       show interrupt count for IRQs
-     --nocolor         Don't use colored output (auto-selected if not a tty)
-     --compact         Use compact display mode (for big number of CPUs)
-  -k|--kernel-threads  Show kernel threads
-  -d|--defined-only    Only show tasks/irqs with non-standard affinity
+  -h|--help              This help
+  -V|--version           Report version
+     --dry|--pretend     Don't apply the changes, only show them
 
-  -I|--set-irq LIST    Set the affinity of interrupt in LIST to CPUs listed by -C
-  -P|--set-proc LIST   Set the affinity of processes in LIST to CPUs listed by -C
-  -C|--set-proc LIST   Set LIST of CPUs on which to bind given processes or interrupts
+  # Output modifiers (columns format)
+  -c|--show-cpus LIST    Filter on the CPUs list to display
+  -s|--statistics        Show statistics (%cpu,%mem,sched,state) for process or
+                           show interrupt count for IRQs
+     --nocolor           Don't use colored output (auto-selected if not a tty)
+     --compact           Use compact display mode (for big number of CPUs)
 
-  --pctcpu=[-]<0-99>   Select only process that consumes more (or less if prefixed
-                       by -) than the specified percentage of CPU
-  --pctmem=[-]<0-99>   Select only process that consumes more (or less if prefixed
-                       by -) than the specified percentage of RAM
+  # Elements filters (lines selection)
+  -i|--show-irq LIST     Show interrupts with IRQ number in LIST
+  -p|--show-proc LIST    Show process with PID in LIST
+  -u|--show-user USERS   Show only process that belongs to USERS
+  -m|--show-modified     Show only IRQ or Process that had their affinity modified
+                           by options -I or -P
+     --realtime          Show only process with real-time priority
+  -k|--kernel-threads    Show kernel threads
+  -d|--defined-only      Only show tasks/irqs with non-standard affinity
+     --pctcpu=[-]<0-99>  Select only process that consumes more (or less if prefixed
+                           by -) than the specified percentage of CPU
+     --pctmem=[-]<0-99>  Select only process that consumes more (or less if prefixed
+                           by -) than the specified percentage of RAM
+
+  # Affinity modifiers
+  -I|--set-irq LIST      Set the affinity of interrupt in LIST to CPUs listed by -C
+  -P|--set-proc LIST     Set the affinity of processes in LIST to CPUs listed by -C
+  -C|--set-proc LIST     Set LIST of CPUs on which to bind given processes or interrupts
+
+  # Check system health
+     --check-all         Check both IRQs and Process affinity correctness
+     --check-irqs        Check IRQs are bound to their local NUMA node
+     --check-procs       Check spinning process are on an isolated and dedicated CPU
+     --check-cpupct=0-99 %CPU consuption after what a process is considered spinning
+     --check-runtime=    Seconds of runtime after what a spinning process is considered
+                           long-running and should have its own dedicated CPU
+
 
   LIST can be a combination of list and sequences of numbers, or keyword 'ALL':
     1,2,3,4              Explicit listing
@@ -1470,3 +1475,13 @@ smp_affinity [-ksdh] [--nocolor] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs
 
 =head1 EXAMPLES
 
+  # Show statistics of process having a non-standard affinity
+  smp_affinity -sd
+
+  # Show all process that have consumed more than 30% of CPU time in their lifetime
+  smp_affinity -s --pctcpu=30
+
+  # Show all process running on isolated cores
+
+  # Affect Process 11001,12000-12005 to CPU 1,2,3
+  smp_affinity -P 11
