@@ -462,8 +462,14 @@ if ($opt_show_onlymod) {
 
 # IRQs
 if (@opt_set_listirq) {
-
+	my $cpu_set_nth = 0;
 	foreach my $irq (@opt_set_listirq) {
+		# If we want a distribution of the IRQs on provided CPUs
+		if ($opt_set_distribute) {
+			# Change the cpu mask
+			$cpu_set_nth += $opt_set_distribute;
+			$cpu_set_mask->enableOnlyNthItem( $cpu_set_nth );
+		}
 
 		my $irq_affinity_mask = irq_getaffinity($irq);
 		# Pretend to change...
@@ -484,7 +490,15 @@ if (@opt_set_listirq) {
 # Processes
 if (@opt_set_listproc) {
 
+	my $cpu_set_nth = 0;
 	foreach my $pid (@opt_set_listproc) {
+
+		# If we want a distribution of the IRQs on provided CPUs
+		if ($opt_set_distribute) {
+			# Change the cpu mask
+			$cpu_set_nth += $opt_set_distribute;
+			$cpu_set_mask->enableOnlyNthItem( $cpu_set_nth );
+		}
 
 		# Add to display list only if showing modified
 		if ($opt_show_onlymod && $cpu_set_mask->isEqual(proc_getaffinity($pid)) ) {
@@ -1270,6 +1284,7 @@ sub new {
 	# 8 * 64 bits groups int, => up to 512 CPUs
 	my $self = {
 		numGrps     => [],
+		numGrpsOrig => undef,
 		grpMax      => 0,
 	};
 
@@ -1305,6 +1320,40 @@ sub new {
 
 	bless $self, $class;
 	return $self;
+}
+
+
+sub enableOnlyNthItem {
+	my ($self, $nth) = @_;
+
+	# First call: save numGrps to numGrpsOrig
+	if (! defined $self->{numGrpsOrig} ) {
+		@{$self->{numGrpsOrig}} = @{$self->{numGrps}};
+	}
+
+	# Reset numGrps based on the provided number
+	my $elemCnt = 0;
+	for (my $i=0; $i<=$self->{grpMax}; $i++) {
+		# reset local numGrps
+		$self->{numGrps}[$i] = 0;
+		my $num = $self->{numGrpsOrig}[$i];
+
+		# And only update if we may find something (else just skip)
+		if ($elemCnt <= $nth && $num) {
+			for ($b=0; $num > 0; $b++) {
+				# If bit is set, count it
+				if ($num & 1) {
+					$elemCnt++;
+					if ($elemCnt == $nth) {
+						$self->{numGrps}[$i] = 2**$b;
+						last;
+					}
+				}
+				# Bitshift 1 (test next bit)
+				$num = $num >> 1;
+			}
+		}
+	}
 }
 
 # -----------------------------------------------------------------------------
@@ -1449,9 +1498,10 @@ smp_affinity [-ksdh] [--nocolor] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs
                            by -) than the specified percentage of RAM
 
   # Affinity modifiers
+  -C|--set-proc LIST     Set LIST of CPUs on which to bind given processes or interrupts
   -I|--set-irq LIST      Set the affinity of interrupt in LIST to CPUs listed by -C
   -P|--set-proc LIST     Set the affinity of processes in LIST to CPUs listed by -C
-  -C|--set-proc LIST     Set LIST of CPUs on which to bind given processes or interrupts
+  -D|--distribute n      Distribute listed IRQs & PIDs to every n CPUs listed by -C
 
   # Check system health
      --check-all         Check both IRQs and Process affinity correctness
@@ -1475,13 +1525,35 @@ smp_affinity [-ksdh] [--nocolor] [-i IRQs] [-p PIDs ] [[-I IRQs|-P PIDs] -C CPUs
 
 =head1 EXAMPLES
 
+  #
+  # Only display affinity
+  #
+
+  # Display affinity from all process (and all IRQs if running as root)
+  smp_affinity
+
+  # Display affinity of large number of CPUs
+  smp_affinity --compact
+
+  # Display affinity + process statistics + kernel process
+  smp_affinity -sk
+
   # Show statistics of process having a non-standard affinity
   smp_affinity -sd
 
   # Show all process that have consumed more than 30% of CPU time in their lifetime
   smp_affinity -s --pctcpu=30
 
-  # Show all process running on isolated cores
+
+  #
+  # Modify affinity of PIDs or IRQs
+  #
 
   # Affect Process 11001,12000-12005 to CPU 1,2,3
   smp_affinity -P 11
+
+  # Distribute IRQs from 50 to 65 to CPUs 16 to 31  (1 CPU per IRQ)
+  smp_affinity --distribute 1 -I 50-65 -C 16-31
+
+  # Distribute PIDs from 123 to 126 to CPUs 18,20,22,24
+  smp_affinity --distribute 2 -P 123-126 -C 18-24
