@@ -76,6 +76,7 @@ my $opt_set_dry;
 my @opt_set_listcpu;
 my @opt_set_listirq;
 my @opt_set_listproc;
+my $opt_set_distribute;
 
 my @cpu_schedrt = ('FF','RR');
 my $bin_taskset = findbin('taskset');
@@ -130,6 +131,7 @@ GetOptions(
 	'C|set-cpu=s'       => \@opt_set_listcpu,
 	'I|set-irq=s'       => \@opt_set_listirq,
 	'P|set-proc=s'      => \@opt_set_listproc,
+	'D|distribute=i'    => \$opt_set_distribute,
 
 	'check-all!'        => \$opt_do_check_all,
 	'check-irq!'        => \$opt_do_check_irqs,
